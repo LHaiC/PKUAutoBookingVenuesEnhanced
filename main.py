@@ -50,7 +50,11 @@ def load_config(config):
     pass_word = conf['chaojiying']['password']
     soft_id = conf['chaojiying']['soft_id']
 
-    return (user_name, password, venue, venue_num, start_time, end_time, wechat_notice, sckey, username, pass_word, soft_id)
+    glm_enabled = conf.getboolean('glm_ocr', 'enabled') if conf.has_section('glm_ocr') else False
+    glm_endpoint = conf['glm_ocr']['endpoint'] if conf.has_section('glm_ocr') else 'http://localhost:8000'
+    glm_timeout = conf.getint('glm_ocr', 'timeout') if conf.has_option('glm_ocr', 'timeout') else 10
+
+    return (user_name, password, venue, venue_num, start_time, end_time, wechat_notice, sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout)
 
 
 def log_status(config, start_time, log_str):
@@ -66,7 +70,7 @@ def log_status(config, start_time, log_str):
 
 
 def page(config, browser="chrome"):
-    user_name, password, venue, venue_num, start_time, end_time, wechat_notice, sckey, username, pass_word, soft_id = load_config(config)
+    user_name, password, venue, venue_num, start_time, end_time, wechat_notice, sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout = load_config(config)
 
     log_str = ""
     status = True
@@ -134,7 +138,7 @@ def page(config, browser="chrome"):
             status = False
     if status:
         try:
-            log_str += verify(driver, username, pass_word, soft_id)
+            log_str += verify(driver, glm_enabled, glm_endpoint, glm_timeout, username, pass_word, soft_id)
         except:
             log_str += "安全验证失败\n"
             print("安全验证失败\n")
