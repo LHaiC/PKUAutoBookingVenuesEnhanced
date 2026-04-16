@@ -322,43 +322,11 @@ def click_submit_order(driver):
     return log_str
 
 
-def verify(driver, username, pass_word, soft_id):
-    print("进入安全验证")
-    log_str = "进入安全验证\n"
-    # 创建ActionChains对象
-    actions = ActionChains(driver)
-    target_element = driver.find_element(By.XPATH,
-                                         "/html/body/div[1]/div/div/div[3]/div[2]/div/div[1]/div[2]/div[4]/div[3]/div/div[2]/div/div[1]/div/img")
-    order = driver.find_element(By.XPATH,
-                                "/html/body/div[1]/div/div/div[3]/div[2]/div/div[1]/div[2]/div[4]/div[3]/div/div[2]/div/div[2]/span")
-    image_uri = target_element.get_attribute("src")
-    order_str = order.text
-    order_words = order_str[-6:-1].split(",")
-    # print(order_words)
-    data_start = image_uri.find(",") + 1
-    image_base64 = image_uri[data_start:]
-    # print(image_base64)
-    # image_content = response.content
-    image_content = base64.b64decode(image_base64)
-
-    chaojiying = Chaojiying_Client(username, pass_word, soft_id)
-    ans_str = chaojiying.PostPic(image_content, 9501)
-    # print(ans_str)
-    words = ans_str['pic_str'].split('|')
-    # print(words)
-    words_loc = []
-    for i in range(len(words)):
-        words_loc.append(words[i].split(','))
-    # print(words_loc)
-    for i in range(3):
-        for j in range(len(words_loc)):
-            if order_words[i] == words_loc[j][0]:
-                # print(words_loc[j][0], int(words_loc[j][1]), int(words_loc[j][2]))
-                actions.move_to_element_with_offset(target_element, int(words_loc[j][1]) - 160,
-                                                    int(words_loc[j][2]) - 72).click().perform()
-    print("安全验证成功")
-    log_str += "安全验证成功\n"
-    return log_str
+def verify(driver, glm_enabled, glm_endpoint, glm_timeout,
+           cy_username, cy_password, cy_soft_id):
+    from captcha_solver import solve_captcha
+    return solve_captcha(driver, glm_enabled, glm_endpoint, glm_timeout,
+                         cy_username, cy_password, cy_soft_id)
 
 
 def click_pay(driver):
