@@ -103,7 +103,7 @@ def click_agree(driver):
     return log_str
 
 
-def judge_exceeds_days_limit(start_time, end_time):
+def judge_exceeds_days_limit(start_time, end_time, duration=1):
     start_time_list = start_time.split('/')
     end_time_list = end_time.split('/')
     print(start_time_list, end_time_list)
@@ -145,7 +145,7 @@ def judge_exceeds_days_limit(start_time, end_time):
     return start_time_list_new, end_time_list_new, delta_day_list, log_str
 
 
-def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_num=-1):
+def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_num=-1, duration=1):
     print("查找空闲场地")
     log_str = "查找空闲场地\n"
 
@@ -280,6 +280,13 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
         if status:
             log_str += "找到空闲场地，场地编号为%d\n" % venue_num
             print("找到空闲场地，场地编号为%d\n" % venue_num)
+            if duration == 2:
+                # 尝试订第二个连续slot（同一场地，下一个小时）
+                next_time_num = time_num + 1
+                status2, venue_num2 = click_free(venue_num, next_time_num)
+                if status2:
+                    log_str += f"找到第二个连续空闲场地，场地编号为{venue_num2}\n"
+                    print(f"找到第二个连续空闲场地，场地编号为{venue_num2}\n")
             now = datetime.datetime.now()
             today = datetime.datetime.strptime(str(now)[:10], "%Y-%m-%d")
             date = today + datetime.timedelta(days=delta_day)

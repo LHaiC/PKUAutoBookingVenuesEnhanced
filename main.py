@@ -54,7 +54,9 @@ def load_config(config):
     glm_endpoint = conf['glm_ocr']['endpoint'] if conf.has_section('glm_ocr') else 'http://localhost:8000'
     glm_timeout = conf.getint('glm_ocr', 'timeout') if conf.has_option('glm_ocr', 'timeout') else 10
 
-    return (user_name, password, venue, venue_num, start_time, end_time, wechat_notice, sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout)
+    duration = conf.getint('time', 'duration') if conf.has_option('time', 'duration') else 1
+
+    return (user_name, password, venue, venue_num, start_time, end_time, wechat_notice, sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout, duration)
 
 
 def log_status(config, start_time, log_str):
@@ -70,7 +72,7 @@ def log_status(config, start_time, log_str):
 
 
 def page(config, browser="chrome"):
-    user_name, password, venue, venue_num, start_time, end_time, wechat_notice, sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout = load_config(config)
+    user_name, password, venue, venue_num, start_time, end_time, wechat_notice, sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout, duration = load_config(config)
 
     log_str = ""
     status = True
@@ -115,7 +117,7 @@ def page(config, browser="chrome"):
         try:
             sleep(2)
             status, log_book, start_time, end_time, venue_num = book(driver, start_time_list_new,
-                                                                 end_time_list_new, delta_day_list, venue, venue_num)
+                                                                 end_time_list_new, delta_day_list, venue, venue_num, duration)
             log_str += log_book
         except:
             log_str += "点击预约表格失败\n"
