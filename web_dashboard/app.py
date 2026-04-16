@@ -8,10 +8,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 app = Flask(__name__)
 
 import json
-import datetime
 from cron import set_crontab, reset_crontab
 
-STATUS_FILE = 'status.json'
+STATUS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'status.json')
 
 @app.route('/')
 def index():
@@ -23,8 +22,10 @@ def status():
         with open(STATUS_FILE, 'r') as f:
             data = json.load(f)
         return jsonify(data)
-    except:
+    except (FileNotFoundError, json.JSONDecodeError):
         return jsonify({"status": "unknown", "last_run": None})
+    except Exception as e:
+        return jsonify({"status": "error", "last_run": None, "error": str(e)})
 
 @app.route('/logs')
 def logs():

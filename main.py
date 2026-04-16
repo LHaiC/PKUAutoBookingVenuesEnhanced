@@ -168,14 +168,16 @@ def page(config, browser="chrome"):
         "status": "success" if status else "failed",
         "last_run": str(datetime.datetime.now()),
         "config": config,
-        "venue": venue if 'venue' in dir() else None,
-        "venue_num": venue_num if 'venue_num' in dir() else None
+        "venue": locals().get('venue'),
+        "venue_num": locals().get('venue_num'),
     }
     try:
         with open('status.json', 'w', encoding='utf-8') as f:
             json.dump(status_data, f, ensure_ascii=False, indent=2)
-    except:
+    except (FileNotFoundError, json.JSONDecodeError):
         pass
+    except Exception as e:
+        print(f"写入status.json失败: {e}")
 
     driver.quit()
     log_status(config, [start_time_list_new, end_time_list_new], log_str)
