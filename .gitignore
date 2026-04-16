@@ -2,3 +2,7 @@ __pycache__
 run*.bat
 docs/
 CLAUDE.md.worktrees/
+.worktrees/
+models/
+*.log
+tests/test_output.png

@@ -1,14 +1,56 @@
-# PKU AutoBookingVenues
-
+# PKU AutoBookingVenues Enhanced
 PKU智慧场馆自动预约工具
 
-> 本项目基于 [PKU_Venues_Auto_Book](https://github.com/Charliecwei/PKU_Venues_Auto_Book) 修改，主要针对新版 Selenium 语法和智慧场馆网站更新进行了适配。
+> 本项目基于 [PKUautoBookingVenues-fixed-by-cq-tutu](https://github.com/qqworld-tutu/PKUautoBookingVenues-fixed-by-cq-tutu) 由 Claude Code + MiniMax M2.7 修改。
 
-年久失修的代码如今已经完全无法运行。因此，本项目在之前项目的基础上进行了较大修改，主要体现在以下三个方面：
+### 本次增强更新 (2026-04-16)
+1. **2小时连续预约**：支持自动寻找并预订两个相邻的1小时时段（设置 `duration = 2`）。
+2. **本地 GLM-OCR 验证码识别**：实现本地模型优先、超级鹰兜底的双模式识别，大幅降低成本。
+3. **轻量 Web Dashboard**：基于 Flask 提供的可视化管理界面。
+
+#### 本地 OCR 部署说明
+1. **安装依赖**：
+   ```bash
+   pip install fastapi uvicorn llama-cpp-python
+   ```
+2. **准备模型**：
+   将转换好的 `GLM-OCR` GGUF 模型放入 `models/glm-ocr.gguf`。
+3. **启动 OCR 服务**：
+   ```bash
+   python glm_ocr_server.py
+   ```
+4. **运行测试**：
+   ```bash
+   python tests/test_glm_ocr.py
+   ```
+
+#### Web Dashboard 使用
+1. **启动服务**：
+   ```bash
+   cd web_dashboard && python app.py
+   ```
+2. 访问 `http://localhost:5000` 进行管理。
+
+---
+
+以下是原项目[PKUautoBookingVenues-fixed-by-cq-tutu](https://github.com/qqworld-tutu/PKUautoBookingVenues-fixed-by-cq-tutu)的[README](https://github.com/qqworld-tutu/PKUautoBookingVenues-fixed-by-cq-tutu/blob/master/README.md)内容
+
+---
+
+# PKU AutoBookingVenues -fixed by cq-tutu
+PKU智慧场馆自动预约工具部分代码和这个README的一部分引用自之前的智慧场馆自动预约项目 https://github.com/Charliecwei/PKU_Venues_Auto_Book
+
+本羽毛球鼠鼠想打羽毛球一直抢不到场啊！于是便萌生了自动预约场地的想法。在github上找到了之前大佬写的程序。然而，年久失修的代码如今已经完全无法运行。因此，本项目在之前项目的基础上进行了较大修改，主要体现在以下三个方面：
 
 1. selenium库更新了，之前的语法已经无法跑通
 2. 智慧场馆网站也新写了，许多爬虫代码也随之修改
 3. 提交预约时的验证方式改成了文字点击，于是使用了超级鹰的api来识别
+
+
+
+> [!CAUTION]
+>
+> 本项目还在初期阶段，各方面都不甚完善，如有任何意见或建议，欢迎联系我。（wechat：dj7152，email：chenquan@stu.pku.edu.cn）
 
 
 
@@ -99,7 +141,7 @@ pip install selenium
 
 ## 证书
 
-[Apache License 2.0](../LICENSE)
+[Apache License 2.0](https://github.com/yanyuandaxia/PKUAutoBookingVenues/blob/main/LICENSE)
 
 
 
