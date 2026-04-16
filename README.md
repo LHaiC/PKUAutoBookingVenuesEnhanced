@@ -1,19 +1,14 @@
-# PKU AutoBookingVenues -fixed by cq-tutu
+# PKU AutoBookingVenues
+
 PKU智慧场馆自动预约工具
 
-部分代码和这个README的一部分引用自之前的智慧场馆自动预约项目 https://github.com/Charliecwei/PKU_Venues_Auto_Book
+> 本项目基于 [PKU_Venues_Auto_Book](https://github.com/Charliecwei/PKU_Venues_Auto_Book) 修改，主要针对新版 Selenium 语法和智慧场馆网站更新进行了适配。
 
-本羽毛球鼠鼠想打羽毛球一直抢不到场啊！于是便萌生了自动预约场地的想法。在github上找到了之前大佬写的程序。然而，年久失修的代码如今已经完全无法运行。因此，本项目在之前项目的基础上进行了较大修改，主要体现在以下三个方面：
+年久失修的代码如今已经完全无法运行。因此，本项目在之前项目的基础上进行了较大修改，主要体现在以下三个方面：
 
 1. selenium库更新了，之前的语法已经无法跑通
 2. 智慧场馆网站也新写了，许多爬虫代码也随之修改
 3. 提交预约时的验证方式改成了文字点击，于是使用了超级鹰的api来识别
-
-
-
-> [!CAUTION]
->
-> 本项目还在初期阶段，各方面都不甚完善，如有任何意见或建议，欢迎联系我。（wechat：dj7152，email：chenquan@stu.pku.edu.cn）
 
 
 
@@ -104,7 +99,7 @@ pip install selenium
 
 ## 证书
 
-[Apache License 2.0](https://github.com/yanyuandaxia/PKUAutoBookingVenues/blob/main/LICENSE)
+[Apache License 2.0](../LICENSE)
 
 
 
