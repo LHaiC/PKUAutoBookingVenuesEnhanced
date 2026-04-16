@@ -285,8 +285,15 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
                 next_time_num = time_num + 1
                 status2, venue_num2 = click_free(venue_num, next_time_num)
                 if status2:
-                    log_str += f"找到第二个连续空闲场地，场地编号为{venue_num2}\n"
-                    print(f"找到第二个连续空闲场地，场地编号为{venue_num2}\n")
+                    # 注意：不同时间槽可能分配到不同场地号，需验证一致性
+                    if venue_num2 != venue_num:
+                        log_str += f"[警告] 第二小时场地号({venue_num2})与第一小时({venue_num})不一致\n"
+                        print(f"[警告] 第二小时场地号({venue_num2})与第一小时({venue_num})不一致\n")
+                    else:
+                        log_str += f"找到第二个连续空闲场地，场地编号为{venue_num2}\n"
+                        print(f"找到第二个连续空闲场地，场地编号为{venue_num2}\n")
+                    # 注意：本函数仅返回第一个场地的 venue_num。
+                    # 若需同时通知两小时的场地/时间，需修改返回值接口或依赖上述日志。
             now = datetime.datetime.now()
             today = datetime.datetime.strptime(str(now)[:10], "%Y-%m-%d")
             date = today + datetime.timedelta(days=delta_day)
