@@ -1,6 +1,8 @@
 from configparser import ConfigParser
 from os import stat
 from time import sleep
+import datetime
+import json
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as Chrome_Options
@@ -160,6 +162,21 @@ def page(config, browser="chrome"):
             log_str += "微信通知失败\n"
             print("微信通知失败\n")
     time.sleep(10)
+
+    # 写入状态文件供Dashboard读取
+    status_data = {
+        "status": "success" if status else "failed",
+        "last_run": str(datetime.datetime.now()),
+        "config": config,
+        "venue": venue if 'venue' in dir() else None,
+        "venue_num": venue_num if 'venue_num' in dir() else None
+    }
+    try:
+        with open('status.json', 'w', encoding='utf-8') as f:
+            json.dump(status_data, f, ensure_ascii=False, indent=2)
+    except:
+        pass
+
     driver.quit()
     log_status(config, [start_time_list_new, end_time_list_new], log_str)
     return status
