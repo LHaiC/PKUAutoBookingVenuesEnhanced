@@ -28,10 +28,14 @@ def bbox_in_bounds(bbox: list[int], image_size: tuple[int, int]) -> bool:
 def normalize_candidate(item: dict) -> Candidate | None:
     text = str(item.get("text", "")).strip()
     bbox = item.get("bbox", [])
-    confidence = float(item.get("confidence", 1.0))
     if len(text) != 1 or len(bbox) != 4:
         return None
-    return Candidate(text=text, bbox=[int(v) for v in bbox], confidence=confidence)
+    try:
+        confidence = float(item.get("confidence", 1.0))
+        normalized_bbox = [int(v) for v in bbox]
+    except (TypeError, ValueError):
+        return None
+    return Candidate(text=text, bbox=normalized_bbox, confidence=confidence)
 
 
 def normalize_candidates(items: list[dict]) -> list[Candidate]:
@@ -75,7 +79,7 @@ def match_targets(
         matched.append(
             {
                 "text": candidate.text,
-                "bbox": candidate.bbox,
+                "bbox": list(candidate.bbox),
                 "confidence": candidate.confidence,
             }
         )

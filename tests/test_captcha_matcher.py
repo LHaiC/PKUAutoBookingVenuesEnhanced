@@ -1,6 +1,12 @@
 import unittest
 
-from captcha_matcher import Candidate, MatchError, bbox_center, match_targets
+from captcha_matcher import (
+    Candidate,
+    MatchError,
+    bbox_center,
+    match_targets,
+    normalize_candidates,
+)
 
 
 class CaptchaMatcherTests(unittest.TestCase):
@@ -51,6 +57,24 @@ class CaptchaMatcherTests(unittest.TestCase):
 
         with self.assertRaisesRegex(MatchError, "bbox out of bounds: 件"):
             match_targets(["件"], candidates, image_size=(448, 358))
+
+    def test_normalize_candidates_skips_non_numeric_bbox_values(self):
+        items = [{"text": "件", "bbox": [140, "bad", 190, 110], "confidence": 0.94}]
+
+        self.assertEqual(normalize_candidates(items), [])
+
+    def test_normalize_candidates_skips_non_numeric_confidence(self):
+        items = [{"text": "件", "bbox": [140, 50, 190, 110], "confidence": "bad"}]
+
+        self.assertEqual(normalize_candidates(items), [])
+
+    def test_match_targets_returns_copied_bbox(self):
+        candidate = Candidate(text="件", bbox=[140, 50, 190, 110], confidence=0.94)
+
+        matched = match_targets(["件"], [candidate], image_size=(448, 358))
+        matched[0]["bbox"][0] = 999
+
+        self.assertEqual(candidate.bbox, [140, 50, 190, 110])
 
 
 if __name__ == "__main__":
