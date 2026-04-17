@@ -4,25 +4,32 @@ PKU智慧场馆自动预约工具
 > 本项目基于 [PKUautoBookingVenues-fixed-by-cq-tutu](https://github.com/qqworld-tutu/PKUautoBookingVenues-fixed-by-cq-tutu) 由 Claude Code + MiniMax M2.7 修改。
 
 ### 本次增强更新 (2026-04-16)
-1. **2小时连续预约**：支持自动寻找并预订两个相邻的1小时时段（设置 `duration = 2`）。
-2. **本地 GLM-OCR 验证码识别**：实现本地模型优先、超级鹰兜底的双模式识别，大幅降低成本。
+1. **连续预约**：根据 `start_time` 和 `end_time` 自动推导连续预约时段数量，不再单独配置 `duration`。
+2. **本地 GLM-OCR 验证码识别**：优先使用本地 OCR 服务返回点击坐标；超级鹰仅在 `allow_chaojiying_fallback = true` 时作为显式兜底。
 3. **轻量 Web Dashboard**：基于 Flask 提供的可视化管理界面。
 
 #### 本地 OCR 部署说明
 1. **安装依赖**：
    ```bash
-   pip install fastapi uvicorn llama-cpp-python
+   pip install -r requirements.txt
    ```
 2. **准备模型**：
-   将转换好的 `GLM-OCR` GGUF 模型放入 `models/glm-ocr.gguf`。
+   将 transformers 格式的 GLM-OCR 模型放入 `models/GLM-OCR`。
 3. **启动 OCR 服务**：
    ```bash
-   python glm_ocr_server.py
+   python ocr_server_transformers.py --model models/GLM-OCR --port 8000
    ```
 4. **运行测试**：
    ```bash
-   python tests/test_glm_ocr.py
+   GLM_ENDPOINT=http://localhost:8000/glmocr/parse python tests/test_glm_ocr.py
    ```
+   该脚本会读取 `tests/captcha_samples/` 中最新抓取样本；如果没有样本，则使用 `tests/test.png`。未获得目标字的可点击坐标时脚本会非 0 退出，并把调试图写到 `tests/test_output.png`。
+
+5. **抓取真实验证码样本**：
+   ```bash
+   python tests/capture_captcha_sample.py
+   ```
+   脚本会从实际页面保存验证码图片和目标字元数据，供本地 OCR 集成测试复现。
 
 #### Web Dashboard 使用
 1. **启动服务**：
@@ -101,12 +108,11 @@ pip install selenium
 
 ## 基本用法
 
-1. 将 `config.sample.ini` 文件重命名为 `config0.ini` ，如果需要多个账号预约，或者需要时间上的“与”关系，请设置多个.ini文件（最多为两位数），
-   请不要新建文件，不然自己搞定编码问题
+1. 复制 `config.example.ini` 为 `config.ini`，在 `config.ini` 中填写自己的账号、场馆和时间配置。
 
-2. 用文本编辑器（建议代码编辑器）打开 `config0.ini` 文件
+2. 用文本编辑器（建议代码编辑器）打开 `config.ini` 文件
 
-3. 配置 `[login]` 、`[type]` 、`[time]`、`[wechat_notice]` 、`[chaojiying`]这几个 Section 下的变量，在 `config0.ini.sample` 文件内有详细注释
+3. 配置 `[login]`、`[type]`、`[time]`、`[wechat_notice]`、`[glm_ocr]`、`[chaojiying]` 这几个 Section 下的变量；示例文件内有详细注释。`duration` 已废弃，预约长度由 `start_time` 和 `end_time` 推导。
 
 
 ## 定时运行
