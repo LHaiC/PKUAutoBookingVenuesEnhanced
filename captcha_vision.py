@@ -17,10 +17,9 @@ def validate_bbox(bbox: list[int], size: tuple[int, int]) -> bool:
         return False
     if len(bbox) != 4:
         return False
-    try:
-        x1, y1, x2, y2 = [int(value) for value in bbox]
-    except (TypeError, ValueError):
+    if any(not isinstance(value, int) or isinstance(value, bool) for value in bbox):
         return False
+    x1, y1, x2, y2 = bbox
     width, height = size
     return 0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height
 

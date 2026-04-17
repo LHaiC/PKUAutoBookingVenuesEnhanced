@@ -46,6 +46,8 @@ class CaptchaVisionTests(unittest.TestCase):
         self.assertFalse(validate_bbox(None, (120, 80)))
         self.assertFalse(validate_bbox("20,15,45,55", (120, 80)))
         self.assertFalse(validate_bbox([20, "bad", 45, 55], (120, 80)))
+        self.assertFalse(validate_bbox(["20", "15", "45", "55"], (120, 80)))
+        self.assertFalse(validate_bbox([20.9, 15.1, 45.2, 55.7], (120, 80)))
 
     def test_bbox_center(self):
         self.assertEqual(bbox_center([20, 15, 46, 55]), (33, 35))
