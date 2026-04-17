@@ -259,9 +259,13 @@ class CaptchaSolver:
             actions_class = ActionChains
 
         actions = actions_class(driver)
+        used_indexes = set()
 
         for target_char in order_words:
-            for wl in words_loc:
+            clicked = False
+            for idx, wl in enumerate(words_loc):
+                if idx in used_indexes:
+                    continue
                 if wl[0] == target_char:
                     offset_x, offset_y = self._click_offset(target_element, wl[1], wl[2], image_size)
                     actions.move_to_element_with_offset(
@@ -269,7 +273,11 @@ class CaptchaSolver:
                         offset_x,
                         offset_y,
                     ).click().perform()
+                    used_indexes.add(idx)
+                    clicked = True
                     break
+            if not clicked:
+                raise ValueError(f"missing click target: {target_char}")
 
     def solve(self, driver):
         """

@@ -214,6 +214,36 @@ class CaptchaSolverTests(unittest.TestCase):
                 actions_class=FakeActions,
             )
 
+    def test_click_captcha_uses_distinct_candidates_for_duplicate_targets(self):
+        solver = self.make_solver()
+        FakeActions.instances = []
+
+        solver._click_captcha(
+            driver=object(),
+            target_element=FakeElement(),
+            words_loc=[["件", 224, 179], ["件", 100, 100]],
+            order_words=["件", "件"],
+            image_size=(448, 358),
+            actions_class=FakeActions,
+        )
+
+        calls = FakeActions.instances[0].calls
+        self.assertEqual(calls[0][1:], (0, 0))
+        self.assertNotEqual(calls[0][1:], calls[1][1:])
+
+    def test_click_captcha_rejects_missing_duplicate_candidate(self):
+        solver = self.make_solver()
+
+        with self.assertRaisesRegex(ValueError, "missing click target: 件"):
+            solver._click_captcha(
+                driver=object(),
+                target_element=FakeElement(),
+                words_loc=[["件", 224, 179]],
+                order_words=["件", "件"],
+                image_size=(448, 358),
+                actions_class=FakeActions,
+            )
+
     def test_glm_failure_does_not_fallback_by_default(self):
         class NoFallbackSolver(CaptchaSolver):
             def __init__(self):
