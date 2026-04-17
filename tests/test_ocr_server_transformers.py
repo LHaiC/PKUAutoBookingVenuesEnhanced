@@ -58,6 +58,12 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "Invalid base64 image data")
 
+    def test_parse_route_returns_400_for_missing_images(self):
+        response = TestClient(app).post("/glmocr/parse", json={})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "No images provided")
+
 
 if __name__ == "__main__":
     unittest.main()

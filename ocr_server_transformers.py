@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from PIL import UnidentifiedImageError
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from captcha_matcher import MatchError, match_targets, normalize_candidates
 from captcha_vision import decode_image, image_size, refine_bbox_to_dark_pixels
@@ -21,7 +21,7 @@ engine = None
 
 
 class ParseRequest(BaseModel):
-    images: list[str]
+    images: list[str] = Field(default_factory=list)
     targets: list[str] | None = None
 
 
