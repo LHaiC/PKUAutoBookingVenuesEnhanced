@@ -7,7 +7,6 @@ Captcha Solver with dual-mode support:
 import base64
 import time
 import requests
-from selenium.webdriver.common.action_chains import ActionChains
 
 
 class CaptchaSolver:
@@ -57,7 +56,7 @@ class CaptchaSolver:
         data_uri = f"data:image/jpeg;base64,{image_b64}"
 
         url = f"{self.glm_endpoint}/glmocr/parse"
-        payload = {"images": [data_uri]}
+        payload = {"images": [data_uri], "targets": order_words}
 
         try:
             response = requests.post(url, json=payload, timeout=self.glm_timeout)
@@ -110,6 +109,10 @@ class CaptchaSolver:
                     # Handle different item formats
                     if isinstance(item, dict):
                         text = item.get('text', '')
+                        if text and item.get('x') is not None and item.get('y') is not None:
+                            words_loc.append([text, int(item['x']), int(item['y'])])
+                            continue
+
                         bbox = item.get('bbox', [])
                         if text and bbox and len(bbox) >= 4:
                             # Calculate center of bbox
@@ -160,6 +163,8 @@ class CaptchaSolver:
 
     def _click_captcha(self, driver, target_element, words_loc, order_words):
         """Execute Selenium clicks on the captcha image."""
+        from selenium.webdriver.common.action_chains import ActionChains
+
         actions = ActionChains(driver)
 
         for target_char in order_words:
