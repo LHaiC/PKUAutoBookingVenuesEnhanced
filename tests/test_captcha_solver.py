@@ -143,6 +143,32 @@ class CaptchaSolverTests(unittest.TestCase):
 
         self.assertIsNone(result)
 
+    def test_parse_glm_result_does_not_reuse_candidate_for_duplicate_targets(self):
+        solver = self.make_solver()
+
+        result = solver._parse_glm_result(
+            {"image_size": [30, 10], "results": [{"text": "件", "x": 5, "y": 5}]},
+            ["件", "件"],
+        )
+
+        self.assertIsNone(result)
+
+    def test_parse_glm_result_uses_distinct_candidates_for_duplicate_targets(self):
+        solver = self.make_solver()
+
+        result = solver._parse_glm_result(
+            {
+                "image_size": [30, 10],
+                "results": [
+                    {"text": "件", "x": 5, "y": 5},
+                    {"text": "件", "x": 15, "y": 5},
+                ],
+            },
+            ["件", "件"],
+        )
+
+        self.assertEqual(result, [["件", 5, 5], ["件", 15, 5]])
+
     def test_parse_glm_result_rejects_unsafe_numeric_values(self):
         solver = self.make_solver()
 

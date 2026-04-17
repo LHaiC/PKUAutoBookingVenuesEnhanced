@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 
 
 class MatchError(ValueError):
@@ -25,6 +26,21 @@ def bbox_in_bounds(bbox: list[int], image_size: tuple[int, int]) -> bool:
     return 0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height
 
 
+def _strict_int(value) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError("expected integer")
+    return value
+
+
+def _strict_float(value) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValueError("expected number")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("expected finite number")
+    return number
+
+
 def normalize_candidate(item: dict) -> Candidate | None:
     text = str(item.get("text", "")).strip()
     bbox = item.get("bbox", [])
@@ -33,8 +49,8 @@ def normalize_candidate(item: dict) -> Candidate | None:
     if len(text) != 1 or len(bbox) != 4:
         return None
     try:
-        confidence = float(item.get("confidence", 1.0))
-        normalized_bbox = [int(v) for v in bbox]
+        confidence = _strict_float(item.get("confidence", 1.0))
+        normalized_bbox = [_strict_int(v) for v in bbox]
     except (TypeError, ValueError):
         return None
     return Candidate(text=text, bbox=normalized_bbox, confidence=confidence)
@@ -72,7 +88,7 @@ def match_targets(
             raise MatchError(f"ambiguous target: {target}")
 
         idx, candidate = target_matches[0]
-        if candidate.confidence < min_confidence:
+        if not math.isfinite(candidate.confidence) or candidate.confidence < min_confidence:
             raise MatchError(f"low confidence: {target}")
         if not bbox_in_bounds(candidate.bbox, image_size):
             raise MatchError(f"bbox out of bounds: {target}")

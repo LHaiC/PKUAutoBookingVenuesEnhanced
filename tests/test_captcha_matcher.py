@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import math
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -67,6 +68,15 @@ class CaptchaMatcherTests(unittest.TestCase):
 
         self.assertEqual(normalize_candidates(items), [])
 
+    def test_normalize_candidates_skips_unsafe_numeric_bbox_values(self):
+        items = [
+            {"text": "件", "bbox": [True, 50, 190, 110], "confidence": 0.94},
+            {"text": "叶", "bbox": [140.5, 50, 190, 110], "confidence": 0.94},
+            {"text": "结", "bbox": ["140", 50, 190, 110], "confidence": 0.94},
+        ]
+
+        self.assertEqual(normalize_candidates(items), [])
+
     def test_normalize_candidates_skips_non_sequence_bbox(self):
         items = [{"text": "件", "bbox": None, "confidence": 0.94}]
 
@@ -76,6 +86,20 @@ class CaptchaMatcherTests(unittest.TestCase):
         items = [{"text": "件", "bbox": [140, 50, 190, 110], "confidence": "bad"}]
 
         self.assertEqual(normalize_candidates(items), [])
+
+    def test_normalize_candidates_skips_non_finite_confidence(self):
+        items = [
+            {"text": "件", "bbox": [140, 50, 190, 110], "confidence": math.nan},
+            {"text": "叶", "bbox": [230, 90, 285, 140], "confidence": math.inf},
+        ]
+
+        self.assertEqual(normalize_candidates(items), [])
+
+    def test_match_targets_rejects_non_finite_confidence(self):
+        candidates = [Candidate(text="件", bbox=[140, 50, 190, 110], confidence=math.nan)]
+
+        with self.assertRaisesRegex(MatchError, "low confidence: 件"):
+            match_targets(["件"], candidates, image_size=(448, 358), min_confidence=0.50)
 
     def test_match_targets_returns_copied_bbox(self):
         candidate = Candidate(text="件", bbox=[140, 50, 190, 110], confidence=0.94)

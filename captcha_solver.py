@@ -168,9 +168,13 @@ class CaptchaSolver:
 
                 # Match with order_words
                 matched = []
+                used_indexes = set()
                 for target in order_words:
-                    for wl in words_loc:
+                    for idx, wl in enumerate(words_loc):
+                        if idx in used_indexes:
+                            continue
                         if wl[0] == target:
+                            used_indexes.add(idx)
                             matched.append(wl)
                             break
                 return matched if len(matched) == len(order_words) else None
