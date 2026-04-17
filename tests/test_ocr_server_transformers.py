@@ -113,6 +113,12 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "No images provided")
 
+    def test_parse_route_returns_400_for_invalid_body_shape(self):
+        response = TestClient(app).post("/glmocr/parse", json={"images": None})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "Invalid request body")
+
     def test_parse_route_returns_400_for_invalid_image_bytes_before_model_check(self):
         payload = base64.b64encode(b"abc").decode("utf-8")
 

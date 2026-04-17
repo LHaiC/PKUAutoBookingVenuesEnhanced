@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from PIL import UnidentifiedImageError
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from captcha_matcher import MatchError, match_targets, normalize_candidates
@@ -18,6 +20,11 @@ from captcha_vision import decode_image, image_size, refine_bbox_to_dark_pixels
 
 app = FastAPI()
 engine = None
+
+
+@app.exception_handler(RequestValidationError)
+def validation_exception_handler(_request, _exc):
+    return JSONResponse(status_code=400, content={"detail": "Invalid request body"})
 
 
 class ParseRequest(BaseModel):
