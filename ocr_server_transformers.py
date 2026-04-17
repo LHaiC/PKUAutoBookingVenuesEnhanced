@@ -30,32 +30,44 @@ def decode_data_uri(data_uri: str) -> bytes:
     return base64.b64decode(payload, validate=True)
 
 
-def parse_model_output(output: str) -> list[dict]:
-    json_match = re.search(r"\[.*\]", output, re.DOTALL)
-    if json_match:
+def _find_json_array(output: str):
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\[", output):
         try:
-            parsed = json.loads(json_match.group())
-            if isinstance(parsed, list):
-                candidates = []
-                for item in parsed:
-                    if not isinstance(item, dict):
-                        continue
-                    try:
-                        candidates.append(
-                            {
-                                "text": str(item.get("text", "")).strip(),
-                                "bbox": [int(v) for v in item.get("bbox", [])],
-                                "confidence": float(item.get("confidence", 0.80)),
-                            }
-                        )
-                    except (TypeError, ValueError):
-                        continue
-                return candidates
+            parsed, _end = decoder.raw_decode(output[match.start() :])
         except json.JSONDecodeError:
-            pass
+            continue
+        if isinstance(parsed, list):
+            return parsed
+    return None
+
+
+def parse_model_output(output: str) -> list[dict]:
+    parsed = _find_json_array(output)
+    if parsed is not None:
+        candidates = []
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            try:
+                candidates.append(
+                    {
+                        "text": str(item.get("text", "")).strip(),
+                        "bbox": [int(v) for v in item.get("bbox", [])],
+                        "confidence": float(item.get("confidence", 0.80)),
+                    }
+                )
+            except (TypeError, ValueError):
+                continue
+        return candidates
 
     result_line = re.search(r"识别结果\s*[:：]\s*([^\r\n]+)", output)
-    text_segment = result_line.group(1) if result_line else re.split(r"[:：]", output)[-1]
+    if result_line:
+        text_segment = result_line.group(1)
+    else:
+        text_segment = next((line.strip() for line in output.splitlines() if line.strip()), output)
+        if re.search(r"[:：]", text_segment):
+            text_segment = re.split(r"[:：]", text_segment)[-1]
     chars = re.findall(r"[\u4e00-\u9fff]", text_segment)
     return [{"text": char, "bbox": [], "confidence": 0.50} for char in chars]
 

@@ -63,6 +63,17 @@ class OcrServerTransformerTests(unittest.TestCase):
             [{"text": "件", "bbox": [140, 50, 190, 110], "confidence": 0.94}],
         )
 
+    def test_parse_model_output_uses_first_valid_json_array(self):
+        output = (
+            'answer: [{"text": "件", "bbox": [140, 50, 190, 110]}]\n'
+            "debug: [not json]"
+        )
+
+        self.assertEqual(
+            parse_model_output(output),
+            [{"text": "件", "bbox": [140, 50, 190, 110], "confidence": 0.80}],
+        )
+
     def test_parse_model_output_extracts_single_chinese_characters(self):
         parsed = parse_model_output("识别结果：件叶结")
         self.assertEqual(
@@ -76,6 +87,11 @@ class OcrServerTransformerTests(unittest.TestCase):
 
     def test_parse_model_output_uses_result_line_when_later_colons_exist(self):
         parsed = parse_model_output("识别结果：件叶结\n置信度：0.9")
+
+        self.assertEqual([item["text"] for item in parsed], ["件", "叶", "结"])
+
+    def test_parse_model_output_uses_first_plain_text_line_without_label(self):
+        parsed = parse_model_output("件叶结\n置信度：0.9")
 
         self.assertEqual([item["text"] for item in parsed], ["件", "叶", "结"])
 
