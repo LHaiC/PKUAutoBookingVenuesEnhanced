@@ -3,17 +3,20 @@ from os import stat
 from time import sleep
 import datetime
 import json
+import os
 
 try:
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options as Chrome_Options
+    from selenium.webdriver.chrome.service import Service as Chrome_Service
     from selenium.webdriver.firefox.options import Options as Firefox_Options
-    from selenium.webdriver.firefox.service import Service
+    from selenium.webdriver.firefox.service import Service as Firefox_Service
 except ModuleNotFoundError:
     webdriver = None
     Chrome_Options = None
+    Chrome_Service = None
     Firefox_Options = None
-    Service = None
+    Firefox_Service = None
 import warnings
 import sys
 import multiprocessing as mp
@@ -40,6 +43,63 @@ def sys_path(browser):
             return os.path.join(path, 'geckodriver.bin')
         else:
             raise Exception('不支持该系统')
+
+
+def ensure_selenium_available():
+    if webdriver is None or Chrome_Options is None or Firefox_Options is None:
+        raise RuntimeError(
+            "Selenium 未安装在当前 Python 环境中，请先运行: pip install selenium"
+        )
+
+
+def firefox_profile_root():
+    root = os.path.abspath(".selenium-profiles")
+    os.makedirs(root, exist_ok=True)
+    return root
+
+
+def firefox_binary_location():
+    snap_binary = "/snap/firefox/current/usr/lib/firefox/firefox"
+    if os.path.exists(snap_binary):
+        return snap_binary
+    return None
+
+
+def build_driver(browser, headless=True):
+    ensure_selenium_available()
+
+    if browser == "chrome":
+        chrome_options = Chrome_Options()
+        if headless:
+            chrome_options.add_argument("--headless=new")
+        driver_path = sys_path("chrome")
+        if os.path.exists(driver_path):
+            return webdriver.Chrome(
+                service=Chrome_Service(executable_path=driver_path),
+                options=chrome_options,
+            )
+        return webdriver.Chrome(options=chrome_options)
+
+    if browser == "firefox":
+        firefox_options = Firefox_Options()
+        if headless:
+            firefox_options.add_argument("--headless")
+        binary_location = firefox_binary_location()
+        if binary_location:
+            firefox_options.binary_location = binary_location
+        driver_path = sys_path("firefox")
+        service_args = ["--profile-root", firefox_profile_root()]
+        if os.path.exists(driver_path):
+            return webdriver.Firefox(
+                service=Firefox_Service(executable_path=driver_path, service_args=service_args),
+                options=firefox_options,
+            )
+        return webdriver.Firefox(
+            service=Firefox_Service(service_args=service_args),
+            options=firefox_options,
+        )
+
+    raise Exception("不支持此类浏览器")
 
 
 def load_config(config):
@@ -100,22 +160,8 @@ def page(config, browser="chrome"):
     if len(start_time_list_new) == 0:
         log_status(config, [start_time.split('/'), end_time.split('/')], log_exceeds)
         return False
-    if browser == "chrome":
-        chrome_options = Chrome_Options()
-        chrome_options.add_argument("--headless")
-        driver = webdriver.Chrome(
-            service=Service(executable_path=r'.\chromedriver.exe'))
-        # executable_path=sys_path(browser="chrome"),
-        # service_args=['--ignore-ssl-errors=true', '--ssl-protocol=TLSv1'])
-        print('chrome launched\n')
-    elif browser == "firefox":
-        firefox_options = Firefox_Options()
-        firefox_options.add_argument("--headless")
-        driver = webdriver.Firefox(service=Service(executable_path=r'.\geckodriver.exe'))
-        # executable_path=sys_path(browser="firefox"))
-        print('firefox launched\n')
-    else:
-        raise Exception("不支持此类浏览器")
+    driver = build_driver(browser, headless=True)
+    print(f'{browser} launched\n')
 
     if status:
         try:
