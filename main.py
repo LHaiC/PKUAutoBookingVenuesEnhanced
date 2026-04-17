@@ -4,10 +4,16 @@ from time import sleep
 import datetime
 import json
 
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options as Chrome_Options
-from selenium.webdriver.firefox.options import Options as Firefox_Options
-from selenium.webdriver.firefox.service import Service
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options as Chrome_Options
+    from selenium.webdriver.firefox.options import Options as Firefox_Options
+    from selenium.webdriver.firefox.service import Service
+except ModuleNotFoundError:
+    webdriver = None
+    Chrome_Options = None
+    Firefox_Options = None
+    Service = None
 import warnings
 import sys
 import multiprocessing as mp
@@ -61,12 +67,10 @@ def load_config(config):
         else False
     )
 
-    duration = conf.getint('time', 'duration') if conf.has_option('time', 'duration') else 1
-
     return (
         user_name, password, venue, venue_num, start_time, end_time, wechat_notice,
         sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout,
-        allow_chaojiying_fallback, duration,
+        allow_chaojiying_fallback,
     )
 
 
@@ -86,7 +90,7 @@ def page(config, browser="chrome"):
     (
         user_name, password, venue, venue_num, start_time, end_time, wechat_notice,
         sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout,
-        allow_chaojiying_fallback, duration,
+        allow_chaojiying_fallback,
     ) = load_config(config)
 
     log_str = ""
@@ -132,7 +136,7 @@ def page(config, browser="chrome"):
         try:
             sleep(2)
             status, log_book, start_time, end_time, venue_num = book(driver, start_time_list_new,
-                                                                 end_time_list_new, delta_day_list, venue, venue_num, duration)
+                                                                 end_time_list_new, delta_day_list, venue, venue_num)
             log_str += log_book
         except:
             log_str += "点击预约表格失败\n"
@@ -157,7 +161,7 @@ def page(config, browser="chrome"):
         try:
             log_str += verify(
                 driver, glm_enabled, glm_endpoint, glm_timeout,
-                username, pass_word, soft_id, allow_chaojiying_fallback,
+                allow_chaojiying_fallback, username, pass_word, soft_id,
             )
         except Exception as exc:
             log_str += f"安全验证失败: {exc}\n"
@@ -226,6 +230,6 @@ if __name__ == '__main__':
     # multi_run(lst_conf, browser)
     # sequence_run(lst_conf, browser)
     for i in range(3):
-        status_main = page('config0.ini', browser)
+        status_main = page('config.ini', browser)
         if status_main:
             break

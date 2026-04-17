@@ -40,14 +40,14 @@ class CaptchaSolveError(RuntimeError):
 
 class CaptchaSolver:
     def __init__(self, glm_enabled, glm_endpoint, glm_timeout,
-                 cy_username, cy_password, cy_soft_id, allow_chaojiying_fallback=False):
+                 allow_chaojiying_fallback, cy_username, cy_password, cy_soft_id):
         self.glm_enabled = glm_enabled
         self.glm_endpoint = glm_endpoint.rstrip('/')
         self.glm_timeout = glm_timeout
+        self.allow_chaojiying_fallback = allow_chaojiying_fallback
         self.cy_username = cy_username
         self.cy_password = cy_password
         self.cy_soft_id = cy_soft_id
-        self.allow_chaojiying_fallback = allow_chaojiying_fallback
 
     def _get_captcha_info(self, driver):
         """Extract captcha image base64 and target words from page."""
@@ -311,7 +311,7 @@ class CaptchaSolver:
                     print(f"GLM-OCR 识别成功: {words_loc}")
 
             # Fallback to Chaojiying only when explicitly allowed.
-            if words_loc is None and (not self.glm_enabled or self.allow_chaojiying_fallback):
+            if words_loc is None and self.allow_chaojiying_fallback:
                 print("使用超级鹰识别...")
                 for retry in range(3):
                     cy_result = self._solve_with_chaojiying(image_content, order_words)
@@ -348,7 +348,7 @@ class CaptchaSolver:
 
 
 def solve_captcha(driver, glm_enabled, glm_endpoint, glm_timeout,
-                  cy_username, cy_password, cy_soft_id, allow_chaojiying_fallback=False):
+                  allow_chaojiying_fallback, cy_username, cy_password, cy_soft_id):
     """
     Convenience function to solve captcha.
 
@@ -357,10 +357,10 @@ def solve_captcha(driver, glm_enabled, glm_endpoint, glm_timeout,
         glm_enabled: Whether to try GLM-OCR first
         glm_endpoint: GLM-OCR service endpoint
         glm_timeout: GLM-OCR request timeout in seconds
+        allow_chaojiying_fallback: Whether to call Chaojiying after GLM failure
         cy_username: Chaojiying username
         cy_password: Chaojiying password
         cy_soft_id: Chaojiying soft_id
-        allow_chaojiying_fallback: Whether to call Chaojiying after GLM failure
 
     Returns:
         log string describing the result
@@ -369,9 +369,9 @@ def solve_captcha(driver, glm_enabled, glm_endpoint, glm_timeout,
         glm_enabled=glm_enabled,
         glm_endpoint=glm_endpoint,
         glm_timeout=glm_timeout,
+        allow_chaojiying_fallback=allow_chaojiying_fallback,
         cy_username=cy_username,
         cy_password=cy_password,
         cy_soft_id=cy_soft_id,
-        allow_chaojiying_fallback=allow_chaojiying_fallback,
     )
     return solver.solve(driver)

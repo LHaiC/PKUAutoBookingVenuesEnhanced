@@ -1,11 +1,15 @@
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
+try:
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.common.by import By
+except ModuleNotFoundError:
+    WebDriverWait = None
+    EC = None
+    By = None
 from urllib.parse import quote
 import time
 import datetime
 import warnings
-from selenium.webdriver.common.action_chains import ActionChains
 from chaojiying import *
 import base64
 
@@ -103,7 +107,7 @@ def click_agree(driver):
     return log_str
 
 
-def judge_exceeds_days_limit(start_time, end_time, duration=1):
+def judge_exceeds_days_limit(start_time, end_time):
     start_time_list = start_time.split('/')
     end_time_list = end_time.split('/')
     print(start_time_list, end_time_list)
@@ -145,7 +149,7 @@ def judge_exceeds_days_limit(start_time, end_time, duration=1):
     return start_time_list_new, end_time_list_new, delta_day_list, log_str
 
 
-def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_num=-1, duration=1):
+def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_num=-1):
     print("查找空闲场地")
     log_str = "查找空闲场地\n"
 
@@ -269,6 +273,8 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
         start_time = datetime.datetime.strptime(
             start_time.split('-')[1], "%H%M")
         end_time = datetime.datetime.strptime(end_time.split('-')[1], "%H%M")
+        interval_minutes = int((end_time - start_time).total_seconds() // 60)
+        slot_count = max(1, interval_minutes // 60)
         print("开始时间:%s" % str(start_time).split()[1])
         print("结束时间:%s" % str(end_time).split()[1])
         page, time_num = page_num(venue, start_time)
@@ -280,7 +286,7 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
         if status:
             log_str += "找到空闲场地，场地编号为%d\n" % venue_num
             print("找到空闲场地，场地编号为%d\n" % venue_num)
-            if duration == 2:
+            if slot_count >= 2:
                 # 尝试订第二个连续slot（同一场地，下一个小时）
                 next_time_num = time_num + 1
                 status2, venue_num2 = click_free(venue_num, next_time_num)
@@ -337,11 +343,11 @@ def click_submit_order(driver):
 
 
 def verify(driver, glm_enabled, glm_endpoint, glm_timeout,
-           cy_username, cy_password, cy_soft_id, allow_chaojiying_fallback=False):
+           allow_chaojiying_fallback, cy_username, cy_password, cy_soft_id):
     from captcha_solver import solve_captcha
     return solve_captcha(driver, glm_enabled, glm_endpoint, glm_timeout,
-                         cy_username, cy_password, cy_soft_id,
-                         allow_chaojiying_fallback)
+                         allow_chaojiying_fallback, cy_username, cy_password,
+                         cy_soft_id)
 
 
 def click_pay(driver):

@@ -29,7 +29,7 @@ def status():
 
 @app.route('/logs')
 def logs():
-    log_file = 'config0.log'
+    log_file = 'config.log'
     try:
         with open(log_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()

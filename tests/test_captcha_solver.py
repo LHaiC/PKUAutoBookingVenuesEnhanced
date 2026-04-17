@@ -98,6 +98,7 @@ class CaptchaSolverTests(unittest.TestCase):
             glm_enabled=True,
             glm_endpoint="http://localhost:8000/",
             glm_timeout=3,
+            allow_chaojiying_fallback=False,
             cy_username="",
             cy_password="",
             cy_soft_id="",
@@ -247,7 +248,15 @@ class CaptchaSolverTests(unittest.TestCase):
     def test_glm_failure_does_not_fallback_by_default(self):
         class NoFallbackSolver(CaptchaSolver):
             def __init__(self):
-                super().__init__(True, "http://localhost:8000", 3, "", "", "")
+                super().__init__(
+                    True,
+                    "http://localhost:8000",
+                    3,
+                    False,
+                    "",
+                    "",
+                    "",
+                )
                 self.chaojiying_calls = 0
                 self.clicks = 0
 
@@ -271,6 +280,33 @@ class CaptchaSolverTests(unittest.TestCase):
         self.assertEqual(solver.chaojiying_calls, 0)
         self.assertEqual(solver.clicks, 0)
 
+    def test_disabled_glm_does_not_use_chaojiying_without_fallback(self):
+        class DisabledLocalSolver(CaptchaSolver):
+            def __init__(self):
+                super().__init__(
+                    False,
+                    "http://localhost:8000",
+                    3,
+                    False,
+                    "",
+                    "",
+                    "",
+                )
+                self.chaojiying_calls = 0
+
+            def _get_captcha_info(self, driver):
+                return object(), ["件"], b"image"
+
+            def _solve_with_chaojiying(self, image_content, order_words):
+                self.chaojiying_calls += 1
+                return [["件", 5, 5]]
+
+        solver = DisabledLocalSolver()
+
+        with self.assertRaisesRegex(CaptchaSolveError, "无法识别验证码"):
+            solver.solve(driver=None)
+        self.assertEqual(solver.chaojiying_calls, 0)
+
     def test_glm_failure_can_fallback_when_explicitly_allowed(self):
         class FallbackSolver(CaptchaSolver):
             def __init__(self):
@@ -278,10 +314,10 @@ class CaptchaSolverTests(unittest.TestCase):
                     True,
                     "http://localhost:8000",
                     3,
+                    True,
                     "",
                     "",
                     "",
-                    allow_chaojiying_fallback=True,
                 )
                 self.chaojiying_calls = 0
                 self.clicks = 0
