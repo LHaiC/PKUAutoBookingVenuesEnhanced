@@ -9,15 +9,22 @@ import time
 import requests
 
 
+def _strict_int(value):
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError("expected integer")
+    return value
+
+
 class CaptchaSolver:
     def __init__(self, glm_enabled, glm_endpoint, glm_timeout,
-                 cy_username, cy_password, cy_soft_id):
+                 cy_username, cy_password, cy_soft_id, allow_chaojiying_fallback=False):
         self.glm_enabled = glm_enabled
         self.glm_endpoint = glm_endpoint.rstrip('/')
         self.glm_timeout = glm_timeout
         self.cy_username = cy_username
         self.cy_password = cy_password
         self.cy_soft_id = cy_soft_id
+        self.allow_chaojiying_fallback = allow_chaojiying_fallback
 
     def _get_captcha_info(self, driver):
         """Extract captcha image base64 and target words from page."""
@@ -110,14 +117,21 @@ class CaptchaSolver:
                     if isinstance(item, dict):
                         text = item.get('text', '')
                         if text and item.get('x') is not None and item.get('y') is not None:
-                            words_loc.append([text, int(item['x']), int(item['y'])])
+                            try:
+                                words_loc.append([text, _strict_int(item['x']), _strict_int(item['y'])])
+                            except ValueError:
+                                continue
                             continue
 
                         bbox = item.get('bbox', [])
                         if text and bbox and len(bbox) >= 4:
                             # Calculate center of bbox
-                            x = (bbox[0] + bbox[2]) // 2
-                            y = (bbox[1] + bbox[3]) // 2
+                            try:
+                                x1, y1, x2, y2 = [_strict_int(value) for value in bbox[:4]]
+                            except ValueError:
+                                continue
+                            x = (x1 + x2) // 2
+                            y = (y1 + y2) // 2
                             words_loc.append([text, x, y])
 
                 # Match with order_words
@@ -209,8 +223,8 @@ class CaptchaSolver:
                     method_used = "GLM-OCR"
                     print(f"GLM-OCR 识别成功: {words_loc}")
 
-            # Fallback to Chaojiying if GLM failed or disabled
-            if words_loc is None:
+            # Fallback to Chaojiying only when explicitly allowed.
+            if words_loc is None and (not self.glm_enabled or self.allow_chaojiying_fallback):
                 print("使用超级鹰识别...")
                 for retry in range(3):
                     cy_result = self._solve_with_chaojiying(image_content, order_words)
@@ -245,7 +259,7 @@ class CaptchaSolver:
 
 
 def solve_captcha(driver, glm_enabled, glm_endpoint, glm_timeout,
-                  cy_username, cy_password, cy_soft_id):
+                  cy_username, cy_password, cy_soft_id, allow_chaojiying_fallback=False):
     """
     Convenience function to solve captcha.
 
@@ -257,6 +271,7 @@ def solve_captcha(driver, glm_enabled, glm_endpoint, glm_timeout,
         cy_username: Chaojiying username
         cy_password: Chaojiying password
         cy_soft_id: Chaojiying soft_id
+        allow_chaojiying_fallback: Whether to call Chaojiying after GLM failure
 
     Returns:
         log string describing the result
@@ -267,6 +282,7 @@ def solve_captcha(driver, glm_enabled, glm_endpoint, glm_timeout,
         glm_timeout=glm_timeout,
         cy_username=cy_username,
         cy_password=cy_password,
-        cy_soft_id=cy_soft_id
+        cy_soft_id=cy_soft_id,
+        allow_chaojiying_fallback=allow_chaojiying_fallback,
     )
     return solver.solve(driver)

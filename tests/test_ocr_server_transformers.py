@@ -102,6 +102,26 @@ class OcrServerTransformerTests(unittest.TestCase):
             [{"text": "件", "bbox": [140, 50, 190, 110], "confidence": 0.80}],
         )
 
+    def test_parse_model_output_skips_non_candidate_arrays(self):
+        output = (
+            "debug: [1, 2, 3]\n"
+            'answer: [{"text": "件", "bbox": [140, 50, 190, 110]}]'
+        )
+
+        self.assertEqual(
+            parse_model_output(output),
+            [{"text": "件", "bbox": [140, 50, 190, 110], "confidence": 0.80}],
+        )
+
+    def test_parse_model_output_rejects_unsafe_numeric_values(self):
+        output = (
+            '[{"text": "件", "bbox": [false, false, true, true], "confidence": NaN},'
+            ' {"text": "叶", "bbox": [1.5, 2, 3, 4], "confidence": 0.9},'
+            ' {"text": "结", "bbox": [1, 2, 3, 4], "confidence": NaN}]'
+        )
+
+        self.assertEqual(parse_model_output(output), [])
+
     def test_parse_model_output_extracts_single_chinese_characters(self):
         parsed = parse_model_output("识别结果：件叶结")
         self.assertEqual(

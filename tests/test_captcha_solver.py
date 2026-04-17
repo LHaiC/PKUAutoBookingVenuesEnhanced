@@ -108,6 +108,86 @@ class CaptchaSolverTests(unittest.TestCase):
 
         self.assertEqual(result, [["件", 5, 5]])
 
+    def test_parse_glm_result_rejects_unsafe_numeric_values(self):
+        solver = self.make_solver()
+
+        result = solver._parse_glm_result(
+            {
+                "results": [
+                    {"text": "件", "x": True, "y": 5},
+                    {"text": "件", "bbox": [False, 2, 8, 8]},
+                    {"text": "件", "bbox": [2.5, 2, 8, 8]},
+                ]
+            },
+            ["件"],
+        )
+
+        self.assertIsNone(result)
+
+    def test_glm_failure_does_not_fallback_by_default(self):
+        class NoFallbackSolver(CaptchaSolver):
+            def __init__(self):
+                super().__init__(True, "http://localhost:8000", 3, "", "", "")
+                self.chaojiying_calls = 0
+                self.clicks = 0
+
+            def _get_captcha_info(self, driver):
+                return object(), ["件"], b"image"
+
+            def _solve_with_glm(self, image_content, order_words):
+                return None
+
+            def _solve_with_chaojiying(self, image_content, order_words):
+                self.chaojiying_calls += 1
+                return [["件", 5, 5]]
+
+            def _click_captcha(self, driver, target_element, words_loc, order_words):
+                self.clicks += 1
+
+        solver = NoFallbackSolver()
+
+        log = solver.solve(driver=None)
+
+        self.assertIn("无法识别验证码", log)
+        self.assertEqual(solver.chaojiying_calls, 0)
+        self.assertEqual(solver.clicks, 0)
+
+    def test_glm_failure_can_fallback_when_explicitly_allowed(self):
+        class FallbackSolver(CaptchaSolver):
+            def __init__(self):
+                super().__init__(
+                    True,
+                    "http://localhost:8000",
+                    3,
+                    "",
+                    "",
+                    "",
+                    allow_chaojiying_fallback=True,
+                )
+                self.chaojiying_calls = 0
+                self.clicks = 0
+
+            def _get_captcha_info(self, driver):
+                return object(), ["件"], b"image"
+
+            def _solve_with_glm(self, image_content, order_words):
+                return None
+
+            def _solve_with_chaojiying(self, image_content, order_words):
+                self.chaojiying_calls += 1
+                return [["件", 5, 5]]
+
+            def _click_captcha(self, driver, target_element, words_loc, order_words):
+                self.clicks += 1
+
+        solver = FallbackSolver()
+
+        log = solver.solve(driver=None)
+
+        self.assertIn("安全验证成功", log)
+        self.assertEqual(solver.chaojiying_calls, 1)
+        self.assertEqual(solver.clicks, 1)
+
 
 class GlmOcrEngineTests(unittest.TestCase):
     def test_recognize_builds_transformers_request_without_real_model(self):

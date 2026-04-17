@@ -2,6 +2,7 @@ import argparse
 import base64
 import binascii
 import json
+import math
 import os
 import re
 import tempfile
@@ -37,7 +38,43 @@ def decode_data_uri(data_uri: str) -> bytes:
     return base64.b64decode(payload, validate=True)
 
 
-def _find_json_array(output: str):
+def _strict_int(value) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError("expected integer")
+    return value
+
+
+def _strict_float(value) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValueError("expected number")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("expected finite number")
+    return number
+
+
+def _parse_candidate_items(items: list) -> list[dict]:
+    candidates = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            text = str(item.get("text", "")).strip()
+            if not text:
+                continue
+            candidates.append(
+                {
+                    "text": text,
+                    "bbox": [_strict_int(v) for v in item.get("bbox", [])],
+                    "confidence": _strict_float(item.get("confidence", 0.80)),
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+    return candidates
+
+
+def _find_candidate_json_array(output: str):
     decoder = json.JSONDecoder()
     for match in re.finditer(r"\[", output):
         try:
@@ -45,28 +82,16 @@ def _find_json_array(output: str):
         except json.JSONDecodeError:
             continue
         if isinstance(parsed, list):
-            return parsed
+            candidates = _parse_candidate_items(parsed)
+            if candidates:
+                return candidates
     return None
 
 
 def parse_model_output(output: str) -> list[dict]:
-    parsed = _find_json_array(output)
+    parsed = _find_candidate_json_array(output)
     if parsed is not None:
-        candidates = []
-        for item in parsed:
-            if not isinstance(item, dict):
-                continue
-            try:
-                candidates.append(
-                    {
-                        "text": str(item.get("text", "")).strip(),
-                        "bbox": [int(v) for v in item.get("bbox", [])],
-                        "confidence": float(item.get("confidence", 0.80)),
-                    }
-                )
-            except (TypeError, ValueError):
-                continue
-        return candidates
+        return parsed
 
     result_line = re.search(r"识别结果\s*[:：]\s*([^\r\n]+)", output)
     if result_line:
