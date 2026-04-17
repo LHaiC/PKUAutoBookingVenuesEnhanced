@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw
 from captcha_vision import (
     bbox_center,
     decode_image,
+    detect_colored_text_bboxes,
     detect_dark_regions,
     image_size,
     refine_bbox_to_dark_pixels,
@@ -67,6 +68,18 @@ class CaptchaVisionTests(unittest.TestCase):
 
     def test_refine_bbox_to_dark_pixels_returns_malformed_bbox_unchanged(self):
         self.assertIsNone(refine_bbox_to_dark_pixels(decode_image(make_png_bytes()), None))
+
+    def test_detect_colored_text_bboxes_orders_separate_regions_left_to_right(self):
+        img = Image.new("RGB", (160, 60), (220, 240, 250))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([10, 10, 25, 35], fill=(200, 20, 20))
+        draw.rectangle([50, 12, 67, 38], fill=(20, 120, 220))
+        draw.rectangle([95, 9, 114, 36], fill=(230, 40, 180))
+
+        self.assertEqual(
+            detect_colored_text_bboxes(img),
+            [[10, 10, 26, 36], [50, 12, 68, 39], [95, 9, 115, 37]],
+        )
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ import re
 import tempfile
 from contextlib import contextmanager
 
-from PIL import UnidentifiedImageError
+from PIL import Image, UnidentifiedImageError
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from captcha_matcher import MatchError, match_targets, normalize_candidates
-from captcha_vision import decode_image, image_size, refine_bbox_to_dark_pixels
+from captcha_vision import decode_image, detect_colored_text_bboxes, image_size, refine_bbox_to_dark_pixels
 
 
 app = FastAPI()
@@ -96,12 +96,38 @@ def parse_model_output(output: str) -> list[dict]:
     result_line = re.search(r"识别结果\s*[:：]\s*([^\r\n]+)", output)
     if result_line:
         text_segment = result_line.group(1)
+        chars = re.findall(r"[\u4e00-\u9fff]", text_segment)
     else:
-        text_segment = next((line.strip() for line in output.splitlines() if line.strip()), output)
-        if re.search(r"[:：]", text_segment):
-            text_segment = re.split(r"[:：]", text_segment)[-1]
-    chars = re.findall(r"[\u4e00-\u9fff]", text_segment)
+        chars = []
+        for line in output.replace("<|user|>", "\n").splitlines():
+            text_segment = line.strip()
+            if not text_segment:
+                continue
+            if any(keyword in text_segment for keyword in ("请", "验证", "点击", "场馆", "预约", "完成", "安全")):
+                continue
+            if re.search(r"[:：]", text_segment):
+                text_segment = re.split(r"[:：]", text_segment)[-1]
+            chars.extend(re.findall(r"[\u4e00-\u9fff]", text_segment))
     return [{"text": char, "bbox": [], "confidence": 0.50} for char in chars]
+
+
+def attach_colored_text_bboxes(image: Image.Image, candidates: list[dict]) -> list[dict]:
+    if not candidates:
+        return candidates
+    if all(len(item.get("bbox", [])) == 4 for item in candidates):
+        return candidates
+
+    boxes = detect_colored_text_bboxes(image)
+    if len(boxes) < len(candidates):
+        return candidates
+
+    updated = []
+    for item, bbox in zip(candidates, boxes):
+        item = dict(item)
+        if len(item.get("bbox", [])) != 4:
+            item["bbox"] = bbox
+        updated.append(item)
+    return updated
 
 
 @contextmanager
@@ -143,18 +169,7 @@ class GlmOcrEngine:
         if not self.loaded:
             raise RuntimeError("model not loaded")
 
-        target_text = "、".join(targets or [])
-        if target_text:
-            prompt = (
-                "请识别图片中的中文验证码字符，并只输出 JSON 数组。"
-                f"必须包含这些目标字符：{target_text}。"
-                '格式为 [{"text":"字","bbox":[x_min,y_min,x_max,y_max],"confidence":0.0}]。'
-            )
-        else:
-            prompt = (
-                "请识别图片中的中文验证码字符，并只输出 JSON 数组。"
-                '格式为 [{"text":"字","bbox":[x_min,y_min,x_max,y_max],"confidence":0.0}]。'
-            )
+        prompt = "Text Recognition:"
 
         with temporary_image_file(image_bytes) as image_path:
             messages = [
@@ -189,7 +204,7 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
 
     size = image_size(image)
     raw_output = engine.recognize(image_bytes, targets)
-    raw_candidates = parse_model_output(raw_output)
+    raw_candidates = attach_colored_text_bboxes(image, parse_model_output(raw_output))
 
     if targets:
         refined_items = []

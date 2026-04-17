@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import HTTPException
 from fastapi.exceptions import RequestValidationError
-from PIL import Image
+from PIL import Image, ImageDraw
 
 import ocr_server_transformers
 from ocr_server_transformers import (
@@ -55,6 +55,14 @@ class FakeJsonEngine:
             ' {"text": "叶", "bbox": [10, 0, 20, 10], "confidence": 0.89},'
             ' {"text": "结", "bbox": [20, 0, 30, 10], "confidence": 0.91}]'
         )
+
+
+class FakeTextRecognitionEngine:
+    model_path = "fake"
+    loaded = True
+
+    def recognize(self, image_bytes, targets):
+        return "提 结 叶\n件"
 
 
 class OcrServerTransformerTests(unittest.TestCase):
@@ -218,6 +226,34 @@ class OcrServerTransformerTests(unittest.TestCase):
                 {"text": "件", "bbox": [2, 2, 8, 8], "x": 5, "y": 5, "confidence": 0.94},
                 {"text": "叶", "bbox": [12, 2, 18, 8], "x": 15, "y": 5, "confidence": 0.89},
                 {"text": "结", "bbox": [22, 2, 28, 8], "x": 25, "y": 5, "confidence": 0.91},
+            ],
+        )
+
+    def test_parse_route_derives_click_coordinates_from_text_and_colored_regions(self):
+        ocr_server_transformers.engine = FakeTextRecognitionEngine()
+        image = Image.new("RGB", (160, 60), (220, 240, 250))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([10, 10, 25, 35], fill=(200, 20, 20))
+        draw.rectangle([50, 12, 67, 38], fill=(20, 120, 220))
+        draw.rectangle([95, 9, 114, 36], fill=(230, 40, 180))
+        draw.rectangle([130, 14, 148, 42], fill=(180, 30, 200))
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        response = parse(
+            ParseRequest(
+                images=[f"data:image/png;base64,{payload}"],
+                targets=["件", "叶", "结"],
+            )
+        )
+
+        self.assertEqual(
+            response["results"],
+            [
+                {"text": "件", "bbox": [130, 14, 149, 43], "x": 139, "y": 28, "confidence": 0.5},
+                {"text": "叶", "bbox": [95, 9, 115, 37], "x": 105, "y": 23, "confidence": 0.5},
+                {"text": "结", "bbox": [50, 12, 68, 39], "x": 59, "y": 25, "confidence": 0.5},
             ],
         )
 

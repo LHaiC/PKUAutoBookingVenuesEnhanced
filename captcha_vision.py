@@ -1,4 +1,5 @@
 import io
+import colorsys
 from collections import deque
 
 from PIL import Image
@@ -73,6 +74,90 @@ def detect_dark_regions(
 
     regions.sort(key=lambda box: (box[0], box[1]))
     return regions
+
+
+def _colored_text_pixel(r: int, g: int, b: int) -> bool:
+    hue, saturation, value = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    hue *= 360
+    if saturation < 0.28 or value > 0.97:
+        return False
+    # The captcha background commonly contains green plants. Excluding green
+    # prevents those large background components from being treated as text.
+    return not (45 <= hue <= 170)
+
+
+def _merge_nearby_boxes(boxes: list[list[int]], margin: int = 4) -> list[list[int]]:
+    merged = []
+    for box in boxes:
+        x1, y1, x2, y2 = box
+        matched = False
+        for existing in merged:
+            ex1, ey1, ex2, ey2 = existing
+            if x1 <= ex2 + margin and x2 + margin >= ex1 and y1 <= ey2 + margin and y2 + margin >= ey1:
+                existing[:] = [min(ex1, x1), min(ey1, y1), max(ex2, x2), max(ey2, y2)]
+                matched = True
+                break
+        if not matched:
+            merged.append(list(box))
+    return merged
+
+
+def detect_colored_text_bboxes(
+    image: Image.Image,
+    min_area: int = 60,
+) -> list[list[int]]:
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    pixels = rgb.load()
+    mask = [
+        [_colored_text_pixel(*pixels[x, y]) for x in range(width)]
+        for y in range(height)
+    ]
+    visited = [[False for _ in range(width)] for _ in range(height)]
+    regions = []
+
+    for y in range(height):
+        for x in range(width):
+            if visited[y][x] or not mask[y][x]:
+                continue
+
+            queue = deque([(x, y)])
+            visited[y][x] = True
+            xs = []
+            ys = []
+
+            while queue:
+                cx, cy = queue.popleft()
+                xs.append(cx)
+                ys.append(cy)
+                for nx in (cx - 1, cx, cx + 1):
+                    for ny in (cy - 1, cy, cy + 1):
+                        if nx == cx and ny == cy:
+                            continue
+                        if nx < 0 or ny < 0 or nx >= width or ny >= height:
+                            continue
+                        if visited[ny][nx] or not mask[ny][nx]:
+                            continue
+                        visited[ny][nx] = True
+                        queue.append((nx, ny))
+
+            if len(xs) < min_area:
+                continue
+            box = [min(xs), min(ys), max(xs) + 1, max(ys) + 1]
+            box_width = box[2] - box[0]
+            box_height = box[3] - box[1]
+            density = len(xs) / (box_width * box_height)
+            if density < 0.15:
+                continue
+            if not (8 <= box_width <= min(100, width * 0.35)):
+                continue
+            if not (8 <= box_height <= min(100, height * 0.65)):
+                continue
+            regions.append(box)
+
+    regions.sort(key=lambda box: (box[0], box[1]))
+    merged = _merge_nearby_boxes(regions)
+    return [box for box in merged if validate_bbox(box, image.size)]
 
 
 def refine_bbox_to_dark_pixels(

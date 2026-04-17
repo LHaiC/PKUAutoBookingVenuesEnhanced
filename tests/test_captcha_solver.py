@@ -420,7 +420,7 @@ class GlmOcrEngineTests(unittest.TestCase):
         self.assertEqual(processor.inputs.device, "cpu")
         self.assertNotIn("token_type_ids", model.generate_kwargs)
         self.assertIs(model.generate_kwargs["input_ids"], processor.inputs["input_ids"])
-        self.assertIn("件、叶", processor.messages[0]["content"][1]["text"])
+        self.assertEqual(processor.messages[0]["content"][1]["text"], "Text Recognition:")
         self.assertEqual(processor.decode_args, ([201, 202], False))
 
 
