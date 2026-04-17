@@ -48,7 +48,8 @@ def parse_model_output(output: str) -> list[dict]:
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
 
-    text_segment = re.split(r"[:：]", output)[-1]
+    result_line = re.search(r"识别结果\s*[:：]\s*([^\r\n]+)", output)
+    text_segment = result_line.group(1) if result_line else re.split(r"[:：]", output)[-1]
     chars = re.findall(r"[\u4e00-\u9fff]", text_segment)
     return [{"text": char, "bbox": [], "confidence": 0.50} for char in chars]
 

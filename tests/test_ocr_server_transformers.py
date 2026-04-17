@@ -45,6 +45,11 @@ class OcrServerTransformerTests(unittest.TestCase):
             ],
         )
 
+    def test_parse_model_output_uses_result_line_when_later_colons_exist(self):
+        parsed = parse_model_output("识别结果：件叶结\n置信度：0.9")
+
+        self.assertEqual([item["text"] for item in parsed], ["件", "叶", "结"])
+
     def test_parse_route_returns_503_when_model_unloaded(self):
         payload = base64.b64encode(b"abc").decode("utf-8")
         response = TestClient(app).post("/glmocr/parse", json={"images": [payload]})
