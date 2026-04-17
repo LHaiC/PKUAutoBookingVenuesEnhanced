@@ -28,6 +28,8 @@ def bbox_in_bounds(bbox: list[int], image_size: tuple[int, int]) -> bool:
 def normalize_candidate(item: dict) -> Candidate | None:
     text = str(item.get("text", "")).strip()
     bbox = item.get("bbox", [])
+    if not isinstance(bbox, (list, tuple)):
+        return None
     if len(text) != 1 or len(bbox) != 4:
         return None
     try:

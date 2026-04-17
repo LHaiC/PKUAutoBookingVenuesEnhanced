@@ -63,6 +63,11 @@ class CaptchaMatcherTests(unittest.TestCase):
 
         self.assertEqual(normalize_candidates(items), [])
 
+    def test_normalize_candidates_skips_non_sequence_bbox(self):
+        items = [{"text": "件", "bbox": None, "confidence": 0.94}]
+
+        self.assertEqual(normalize_candidates(items), [])
+
     def test_normalize_candidates_skips_non_numeric_confidence(self):
         items = [{"text": "件", "bbox": [140, 50, 190, 110], "confidence": "bad"}]
 
