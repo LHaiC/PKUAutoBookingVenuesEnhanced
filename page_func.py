@@ -16,6 +16,89 @@ import base64
 warnings.filterwarnings('ignore')
 
 
+VENUE_ALIASES = {
+    "五四羽毛球馆": ("五四体育中心", "羽毛球馆"),
+    "五四体育中心-羽毛球馆": ("五四体育中心", "羽毛球馆"),
+    "邱德拔羽毛球场": ("邱德拔体育馆", "羽毛球场"),
+    "邱德拔体育馆-羽毛球场": ("邱德拔体育馆", "羽毛球场"),
+}
+
+
+def venue_parent_and_place(venue):
+    venue = venue.strip()
+    if venue in VENUE_ALIASES:
+        return VENUE_ALIASES[venue]
+    if "-" in venue:
+        parent, place = venue.split("-", 1)
+        return parent.strip(), place.strip()
+    return None, venue
+
+
+def venue_card_xpath(venue):
+    parent, place = venue_parent_and_place(venue)
+    if parent:
+        return (
+            f"//dl[.//dt[contains(@title, '{parent}')] "
+            f"and .//dd[normalize-space()='{place}']]"
+        )
+    return f"//*[contains(text(), '{place}')]"
+
+
+def sports_hall_place_xpath(venue):
+    parent, place = venue_parent_and_place(venue)
+    if not parent:
+        return None
+    return (
+        f"//div[contains(@class, 'li') and .//h4[contains(normalize-space(), '{parent}')]]"
+        f"//*[contains(concat(' ', normalize-space(@class), ' '), ' place-item ') "
+        f"and normalize-space()='{place}']"
+    )
+
+
+def booking_venue_kind(venue):
+    _parent, place = venue_parent_and_place(venue)
+    if "羽毛球馆" in place:
+        return "羽毛球馆"
+    if "羽毛球场" in place:
+        return "羽毛球场"
+    return place
+
+
+def click_venue_card(driver, venue):
+    candidates = [venue_card_xpath(venue)]
+    hall_xpath = sports_hall_place_xpath(venue)
+    if hall_xpath:
+        candidates.append(hall_xpath)
+
+    last_error = None
+    for xpath in candidates:
+        try:
+            element = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, xpath))
+            )
+            driver.execute_script('arguments[0].scrollIntoView({block: "center"});', element)
+            time.sleep(0.3)
+            driver.execute_script('arguments[0].click();', element)
+            return
+        except Exception as exc:
+            last_error = exc
+    raise last_error
+
+
+def reset_to_first_window(driver):
+    handles = driver.window_handles
+    if not handles:
+        return
+    first = handles[0]
+    for handle in handles[1:]:
+        try:
+            driver.switch_to.window(handle)
+            driver.close()
+        except Exception:
+            pass
+    driver.switch_to.window(first)
+
+
 def login(driver, user_name, password, retry=0):
     if retry == 3:
         return '门户登录失败\n'
@@ -60,6 +143,7 @@ def go_to_venue(driver, venue, retry=0):
     log_str = "进入预约 %s 界面\n" % venue
 
     try:
+        driver.switch_to.window(driver.window_handles[0])
         butt_all = driver.find_element(By.ID, 'all')
         driver.execute_script('arguments[0].click();', butt_all)
         WebDriverWait(driver, 10).until_not(
@@ -74,21 +158,14 @@ def go_to_venue(driver, venue, retry=0):
         WebDriverWait(driver, 10).until_not(
             EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
         time.sleep(5)
-        WebDriverWait(driver, 10).until(EC.visibility_of_element_located(
-            (By.XPATH, "/html/body/div[1]/div/div/div[2]/div[1]/div[2]/div[1]/div[2]/div[2]/div")))
-        driver.find_element(By.XPATH,
-                            "/html/body/div[1]/div/div/div[2]/div[1]/div[2]/div[1]/div[2]/div[2]/div").click()
-        WebDriverWait(driver, 10).until_not(
-            EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
+        click_venue_card(driver, venue)
         WebDriverWait(driver, 10).until(
-            EC.visibility_of_element_located((By.XPATH, f"//*[contains(text(), '{venue}')]")))
-        time.sleep(2)
-        driver.find_element(By.XPATH,
-                            f"//*[contains(text(), '{venue}')]").click()
+            EC.visibility_of_element_located((By.XPATH, "//*[contains(text(), '当前位置')]")))
         status = True
         log_str += "进入预约 %s 界面成功\n" % venue
-    except:
-        print("retrying")
+    except Exception as exc:
+        print(f"retrying: {exc}")
+        reset_to_first_window(driver)
         status, log_str = go_to_venue(driver, venue, retry + 1)
     return status, log_str
 
@@ -196,6 +273,7 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
                             '//*[@id="scrollTable"]/table/tbody/tr[last()]/td[last()]/div/i').click()
 
     def page_num(venue, start_time):
+        venue = booking_venue_kind(venue)
         start = str(start_time).split()[1]
         list_num = int(start[:2])
         if venue == "羽毛球场":

@@ -53,7 +53,7 @@ def ensure_selenium_available():
 
 
 def firefox_profile_root():
-    root = os.path.abspath(".selenium-profiles")
+    root = os.path.abspath(os.path.join("models", ".selenium-profiles"))
     os.makedirs(root, exist_ok=True)
     return root
 
