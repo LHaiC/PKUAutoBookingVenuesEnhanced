@@ -42,6 +42,11 @@ class CaptchaVisionTests(unittest.TestCase):
     def test_validate_bbox_rejects_outside_box(self):
         self.assertFalse(validate_bbox([20, 15, 130, 55], (120, 80)))
 
+    def test_validate_bbox_rejects_malformed_inputs(self):
+        self.assertFalse(validate_bbox(None, (120, 80)))
+        self.assertFalse(validate_bbox("20,15,45,55", (120, 80)))
+        self.assertFalse(validate_bbox([20, "bad", 45, 55], (120, 80)))
+
     def test_bbox_center(self):
         self.assertEqual(bbox_center([20, 15, 46, 55]), (33, 35))
 
@@ -57,6 +62,9 @@ class CaptchaVisionTests(unittest.TestCase):
             [10, 5, 55, 65],
         )
         self.assertEqual(refined, [20, 15, 46, 56])
+
+    def test_refine_bbox_to_dark_pixels_returns_malformed_bbox_unchanged(self):
+        self.assertIsNone(refine_bbox_to_dark_pixels(decode_image(make_png_bytes()), None))
 
 
 if __name__ == "__main__":

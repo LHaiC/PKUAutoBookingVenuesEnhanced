@@ -13,9 +13,14 @@ def image_size(image: Image.Image) -> tuple[int, int]:
 
 
 def validate_bbox(bbox: list[int], size: tuple[int, int]) -> bool:
+    if not isinstance(bbox, (list, tuple)):
+        return False
     if len(bbox) != 4:
         return False
-    x1, y1, x2, y2 = bbox
+    try:
+        x1, y1, x2, y2 = [int(value) for value in bbox]
+    except (TypeError, ValueError):
+        return False
     width, height = size
     return 0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height
 
