@@ -21,8 +21,16 @@ from ocr_server_transformers import (
 )
 
 
-def make_png_data_uri() -> str:
-    image = Image.new("RGB", (2, 2), "white")
+def make_png_data_uri(
+    width: int = 2,
+    height: int = 2,
+    dark_boxes: list[tuple[int, int, int, int]] | None = None,
+) -> str:
+    image = Image.new("RGB", (width, height), "white")
+    for x1, y1, x2, y2 in dark_boxes or []:
+        for x in range(x1, x2):
+            for y in range(y1, y2):
+                image.putpixel((x, y), (0, 0, 0))
     buf = io.BytesIO()
     image.save(buf, format="PNG")
     payload = base64.b64encode(buf.getvalue()).decode("utf-8")
@@ -35,6 +43,18 @@ class FakeEngine:
 
     def recognize(self, image_bytes, targets):
         return "识别结果：件叶结"
+
+
+class FakeJsonEngine:
+    model_path = "fake"
+    loaded = True
+
+    def recognize(self, image_bytes, targets):
+        return (
+            '[{"text": "件", "bbox": [0, 0, 10, 10], "confidence": 0.94},'
+            ' {"text": "叶", "bbox": [10, 0, 20, 10], "confidence": 0.89},'
+            ' {"text": "结", "bbox": [20, 0, 30, 10], "confidence": 0.91}]'
+        )
 
 
 class OcrServerTransformerTests(unittest.TestCase):
@@ -150,6 +170,34 @@ class OcrServerTransformerTests(unittest.TestCase):
                 {"text": "件", "bbox": [], "confidence": 0.5},
                 {"text": "叶", "bbox": [], "confidence": 0.5},
                 {"text": "结", "bbox": [], "confidence": 0.5},
+            ],
+        )
+
+    def test_parse_route_preserves_raw_json_results_without_targets(self):
+        ocr_server_transformers.engine = FakeJsonEngine()
+
+        response = parse(ParseRequest(images=[make_png_data_uri(30, 10, [(2, 2, 8, 8)])]))
+
+        self.assertEqual(response["results"][0]["bbox"], [0, 0, 10, 10])
+        self.assertNotIn("x", response["results"][0])
+        self.assertNotIn("y", response["results"][0])
+
+    def test_parse_route_returns_click_coordinates_for_targets(self):
+        ocr_server_transformers.engine = FakeJsonEngine()
+        image = make_png_data_uri(
+            30,
+            10,
+            [(2, 2, 8, 8), (12, 2, 18, 8), (22, 2, 28, 8)],
+        )
+
+        response = parse(ParseRequest(images=[image], targets=["件", "叶", "结"]))
+
+        self.assertEqual(
+            response["results"],
+            [
+                {"text": "件", "bbox": [2, 2, 8, 8], "x": 5, "y": 5, "confidence": 0.94},
+                {"text": "叶", "bbox": [12, 2, 18, 8], "x": 15, "y": 5, "confidence": 0.89},
+                {"text": "结", "bbox": [22, 2, 28, 8], "x": 25, "y": 5, "confidence": 0.91},
             ],
         )
 

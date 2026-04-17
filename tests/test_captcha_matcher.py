@@ -29,9 +29,9 @@ class CaptchaMatcherTests(unittest.TestCase):
         self.assertEqual(
             matched,
             [
-                {"text": "件", "bbox": [140, 50, 190, 110], "confidence": 0.94},
-                {"text": "叶", "bbox": [230, 90, 285, 140], "confidence": 0.89},
-                {"text": "结", "bbox": [70, 120, 130, 170], "confidence": 0.91},
+                {"text": "件", "bbox": [140, 50, 190, 110], "x": 165, "y": 80, "confidence": 0.94},
+                {"text": "叶", "bbox": [230, 90, 285, 140], "x": 257, "y": 115, "confidence": 0.89},
+                {"text": "结", "bbox": [70, 120, 130, 170], "x": 100, "y": 145, "confidence": 0.91},
             ],
         )
 

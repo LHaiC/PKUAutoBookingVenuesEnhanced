@@ -77,11 +77,14 @@ def match_targets(
         if not bbox_in_bounds(candidate.bbox, image_size):
             raise MatchError(f"bbox out of bounds: {target}")
 
+        x, y = bbox_center(candidate.bbox)
         used_indexes.add(idx)
         matched.append(
             {
                 "text": candidate.text,
                 "bbox": list(candidate.bbox),
+                "x": x,
+                "y": y,
                 "confidence": candidate.confidence,
             }
         )

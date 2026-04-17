@@ -166,22 +166,22 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
     raw_output = engine.recognize(image_bytes, targets)
     raw_candidates = parse_model_output(raw_output)
 
-    refined_items = []
-    for item in raw_candidates:
-        bbox = item.get("bbox", [])
-        if len(bbox) == 4:
-            item = dict(item)
-            item["bbox"] = refine_bbox_to_dark_pixels(image, [int(v) for v in bbox])
-        refined_items.append(item)
-
-    candidates = normalize_candidates(refined_items)
     if targets:
+        refined_items = []
+        for item in raw_candidates:
+            bbox = item.get("bbox", [])
+            if len(bbox) == 4:
+                item = dict(item)
+                item["bbox"] = refine_bbox_to_dark_pixels(image, [int(v) for v in bbox])
+            refined_items.append(item)
+
+        candidates = normalize_candidates(refined_items)
         try:
             results = match_targets(targets, candidates, size)
         except MatchError as exc:
             return {"results": [], "error": "unsafe_ocr_output", "detail": str(exc)}
     else:
-        results = refined_items
+        results = raw_candidates
 
     return {
         "results": results,
