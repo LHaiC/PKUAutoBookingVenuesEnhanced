@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from captcha_solver import CaptchaSolver
+from captcha_solver import CaptchaSolveError, CaptchaSolver
 from ocr_server_transformers import GlmOcrEngine
 
 
@@ -210,9 +210,8 @@ class CaptchaSolverTests(unittest.TestCase):
 
         solver = NoFallbackSolver()
 
-        log = solver.solve(driver=None)
-
-        self.assertIn("无法识别验证码", log)
+        with self.assertRaisesRegex(CaptchaSolveError, "无法识别验证码"):
+            solver.solve(driver=None)
         self.assertEqual(solver.chaojiying_calls, 0)
         self.assertEqual(solver.clicks, 0)
 

@@ -34,6 +34,10 @@ def _point_in_bounds(x, y, image_size):
     return 0 <= x < width and 0 <= y < height
 
 
+class CaptchaSolveError(RuntimeError):
+    pass
+
+
 class CaptchaSolver:
     def __init__(self, glm_enabled, glm_endpoint, glm_timeout,
                  cy_username, cy_password, cy_soft_id, allow_chaojiying_fallback=False):
@@ -314,7 +318,7 @@ class CaptchaSolver:
             if words_loc is None:
                 log_str += "安全验证失败：无法识别验证码\n"
                 print("安全验证失败：无法识别验证码")
-                return log_str
+                raise CaptchaSolveError(log_str.rstrip())
 
             # Execute clicks
             self._click_captcha(driver, target_element, words_loc, order_words, image_size)
@@ -324,9 +328,11 @@ class CaptchaSolver:
             return log_str
 
         except Exception as e:
+            if isinstance(e, CaptchaSolveError):
+                raise
             log_str += f"安全验证异常: {e}\n"
             print(f"安全验证异常: {e}")
-            return log_str
+            raise CaptchaSolveError(log_str.rstrip()) from e
 
 
 def solve_captcha(driver, glm_enabled, glm_endpoint, glm_timeout,

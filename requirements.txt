@@ -1,0 +1,9 @@
+fastapi
+pillow
+pydantic
+pytest
+requests
+selenium
+torch
+transformers
+uvicorn

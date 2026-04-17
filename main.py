@@ -159,9 +159,9 @@ def page(config, browser="chrome"):
                 driver, glm_enabled, glm_endpoint, glm_timeout,
                 username, pass_word, soft_id, allow_chaojiying_fallback,
             )
-        except:
-            log_str += "安全验证失败\n"
-            print("安全验证失败\n")
+        except Exception as exc:
+            log_str += f"安全验证失败: {exc}\n"
+            print(f"安全验证失败: {exc}\n")
             status = False
     if status:
         try:
