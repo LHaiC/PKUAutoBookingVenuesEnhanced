@@ -156,10 +156,7 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
         except MatchError as exc:
             return {"results": [], "error": "unsafe_ocr_output", "detail": str(exc)}
     else:
-        results = [
-            {"text": candidate.text, "bbox": candidate.bbox, "confidence": candidate.confidence}
-            for candidate in candidates
-        ]
+        results = refined_items
 
     return {
         "results": results,

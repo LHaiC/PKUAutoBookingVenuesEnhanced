@@ -1,4 +1,5 @@
 import base64
+import io
 import os
 import sys
 import unittest
@@ -6,9 +7,26 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 import ocr_server_transformers
 from ocr_server_transformers import app, decode_data_uri, parse_model_output
+
+
+def make_png_data_uri() -> str:
+    image = Image.new("RGB", (2, 2), "white")
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    payload = base64.b64encode(buf.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{payload}"
+
+
+class FakeEngine:
+    model_path = "fake"
+    loaded = True
+
+    def recognize(self, image_bytes, targets):
+        return "识别结果：件叶结"
 
 
 class OcrServerTransformerTests(unittest.TestCase):
@@ -68,6 +86,21 @@ class OcrServerTransformerTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "No images provided")
+
+    def test_parse_route_preserves_plain_text_results_without_targets(self):
+        ocr_server_transformers.engine = FakeEngine()
+
+        response = TestClient(app).post("/glmocr/parse", json={"images": [make_png_data_uri()]})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["results"],
+            [
+                {"text": "件", "bbox": [], "confidence": 0.5},
+                {"text": "叶", "bbox": [], "confidence": 0.5},
+                {"text": "结", "bbox": [], "confidence": 0.5},
+            ],
+        )
 
 
 if __name__ == "__main__":
