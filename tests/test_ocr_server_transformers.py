@@ -52,6 +52,17 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(parsed[0]["bbox"], [140, 50, 190, 110])
         self.assertEqual(parsed[0]["confidence"], 0.94)
 
+    def test_parse_model_output_skips_bad_json_items(self):
+        output = (
+            '[{"text": "件", "bbox": [140, 50, 190, 110], "confidence": 0.94},'
+            ' {"text": "坏", "bbox": ["bad"], "confidence": "bad"}]'
+        )
+
+        self.assertEqual(
+            parse_model_output(output),
+            [{"text": "件", "bbox": [140, 50, 190, 110], "confidence": 0.94}],
+        )
+
     def test_parse_model_output_extracts_single_chinese_characters(self):
         parsed = parse_model_output("识别结果：件叶结")
         self.assertEqual(
@@ -69,8 +80,7 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual([item["text"] for item in parsed], ["件", "叶", "结"])
 
     def test_parse_route_returns_503_when_model_unloaded(self):
-        payload = base64.b64encode(b"abc").decode("utf-8")
-        response = TestClient(app).post("/glmocr/parse", json={"images": [payload]})
+        response = TestClient(app).post("/glmocr/parse", json={"images": [make_png_data_uri()]})
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["detail"], "Model not loaded")
@@ -87,6 +97,14 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "No images provided")
 
+    def test_parse_route_returns_400_for_invalid_image_bytes_before_model_check(self):
+        payload = base64.b64encode(b"abc").decode("utf-8")
+
+        response = TestClient(app).post("/glmocr/parse", json={"images": [payload]})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "Invalid image data")
+
     def test_parse_route_preserves_plain_text_results_without_targets(self):
         ocr_server_transformers.engine = FakeEngine()
 
@@ -101,6 +119,18 @@ class OcrServerTransformerTests(unittest.TestCase):
                 {"text": "结", "bbox": [], "confidence": 0.5},
             ],
         )
+
+    def test_parse_route_fails_closed_for_plain_text_with_targets(self):
+        ocr_server_transformers.engine = FakeEngine()
+
+        response = TestClient(app).post(
+            "/glmocr/parse",
+            json={"images": [make_png_data_uri()], "targets": ["件", "叶", "结"]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["results"], [])
+        self.assertEqual(response.json()["error"], "unsafe_ocr_output")
 
 
 if __name__ == "__main__":

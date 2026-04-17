@@ -36,16 +36,22 @@ def parse_model_output(output: str) -> list[dict]:
         try:
             parsed = json.loads(json_match.group())
             if isinstance(parsed, list):
-                return [
-                    {
-                        "text": str(item.get("text", "")).strip(),
-                        "bbox": [int(v) for v in item.get("bbox", [])],
-                        "confidence": float(item.get("confidence", 0.80)),
-                    }
-                    for item in parsed
-                    if isinstance(item, dict)
-                ]
-        except (TypeError, ValueError, json.JSONDecodeError):
+                candidates = []
+                for item in parsed:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        candidates.append(
+                            {
+                                "text": str(item.get("text", "")).strip(),
+                                "bbox": [int(v) for v in item.get("bbox", [])],
+                                "confidence": float(item.get("confidence", 0.80)),
+                            }
+                        )
+                    except (TypeError, ValueError):
+                        continue
+                return candidates
+        except json.JSONDecodeError:
             pass
 
     result_line = re.search(r"识别结果\s*[:：]\s*([^\r\n]+)", output)
@@ -130,13 +136,13 @@ class GlmOcrEngine:
 
 
 def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
-    if engine is None or not engine.loaded:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-
     try:
         image = decode_image(image_bytes)
     except (UnidentifiedImageError, OSError) as exc:
         raise HTTPException(status_code=400, detail="Invalid image data") from exc
+    if engine is None or not engine.loaded:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
     size = image_size(image)
     raw_output = engine.recognize(image_bytes, targets)
     raw_candidates = parse_model_output(raw_output)
