@@ -1,11 +1,13 @@
 import argparse
 import base64
+import binascii
 import json
 import os
 import re
 import tempfile
 from contextlib import contextmanager
 
+from PIL import UnidentifiedImageError
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -25,7 +27,7 @@ class ParseRequest(BaseModel):
 
 def decode_data_uri(data_uri: str) -> bytes:
     payload = data_uri.split(",", 1)[1] if "," in data_uri else data_uri
-    return base64.b64decode(payload)
+    return base64.b64decode(payload, validate=True)
 
 
 def parse_model_output(output: str) -> list[dict]:
@@ -130,7 +132,10 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
     if engine is None or not engine.loaded:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    image = decode_image(image_bytes)
+    try:
+        image = decode_image(image_bytes)
+    except (UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid image data") from exc
     size = image_size(image)
     raw_output = engine.recognize(image_bytes, targets)
     raw_candidates = parse_model_output(raw_output)
@@ -167,7 +172,11 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
 def parse(req: ParseRequest):
     if not req.images:
         raise HTTPException(status_code=400, detail="No images provided")
-    return solve_image(decode_data_uri(req.images[0]), req.targets)
+    try:
+        image_bytes = decode_data_uri(req.images[0])
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid base64 image data") from exc
+    return solve_image(image_bytes, req.targets)
 
 
 @app.get("/health")
