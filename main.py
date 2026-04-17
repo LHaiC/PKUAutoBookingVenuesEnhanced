@@ -55,10 +55,19 @@ def load_config(config):
     glm_enabled = conf.getboolean('glm_ocr', 'enabled') if conf.has_section('glm_ocr') else False
     glm_endpoint = conf['glm_ocr']['endpoint'] if conf.has_section('glm_ocr') else 'http://localhost:8000'
     glm_timeout = conf.getint('glm_ocr', 'timeout') if conf.has_option('glm_ocr', 'timeout') else 10
+    allow_chaojiying_fallback = (
+        conf.getboolean('glm_ocr', 'allow_chaojiying_fallback')
+        if conf.has_option('glm_ocr', 'allow_chaojiying_fallback')
+        else False
+    )
 
     duration = conf.getint('time', 'duration') if conf.has_option('time', 'duration') else 1
 
-    return (user_name, password, venue, venue_num, start_time, end_time, wechat_notice, sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout, duration)
+    return (
+        user_name, password, venue, venue_num, start_time, end_time, wechat_notice,
+        sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout,
+        allow_chaojiying_fallback, duration,
+    )
 
 
 def log_status(config, start_time, log_str):
@@ -74,7 +83,11 @@ def log_status(config, start_time, log_str):
 
 
 def page(config, browser="chrome"):
-    user_name, password, venue, venue_num, start_time, end_time, wechat_notice, sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout, duration = load_config(config)
+    (
+        user_name, password, venue, venue_num, start_time, end_time, wechat_notice,
+        sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout,
+        allow_chaojiying_fallback, duration,
+    ) = load_config(config)
 
     log_str = ""
     status = True
@@ -142,7 +155,10 @@ def page(config, browser="chrome"):
             status = False
     if status:
         try:
-            log_str += verify(driver, glm_enabled, glm_endpoint, glm_timeout, username, pass_word, soft_id)
+            log_str += verify(
+                driver, glm_enabled, glm_endpoint, glm_timeout,
+                username, pass_word, soft_id, allow_chaojiying_fallback,
+            )
         except:
             log_str += "安全验证失败\n"
             print("安全验证失败\n")

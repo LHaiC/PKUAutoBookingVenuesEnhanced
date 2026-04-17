@@ -15,6 +15,25 @@ def _strict_int(value):
     return value
 
 
+def _parse_size(value):
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    try:
+        width, height = [_strict_int(item) for item in value]
+    except ValueError:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width, height
+
+
+def _point_in_bounds(x, y, image_size):
+    if image_size is None:
+        return True
+    width, height = image_size
+    return 0 <= x < width and 0 <= y < height
+
+
 class CaptchaSolver:
     def __init__(self, glm_enabled, glm_endpoint, glm_timeout,
                  cy_username, cy_password, cy_soft_id, allow_chaojiying_fallback=False):
@@ -111,6 +130,7 @@ class CaptchaSolver:
                     # If no structured results, try to interpret as raw OCR
                     return None
 
+                image_size = _parse_size(result.get('image_size'))
                 words_loc = []
                 for item in items:
                     # Handle different item formats
@@ -118,9 +138,13 @@ class CaptchaSolver:
                         text = item.get('text', '')
                         if text and item.get('x') is not None and item.get('y') is not None:
                             try:
-                                words_loc.append([text, _strict_int(item['x']), _strict_int(item['y'])])
+                                x = _strict_int(item['x'])
+                                y = _strict_int(item['y'])
                             except ValueError:
                                 continue
+                            if not _point_in_bounds(x, y, image_size):
+                                continue
+                            words_loc.append([text, x, y])
                             continue
 
                         bbox = item.get('bbox', [])
@@ -130,6 +154,10 @@ class CaptchaSolver:
                                 x1, y1, x2, y2 = [_strict_int(value) for value in bbox[:4]]
                             except ValueError:
                                 continue
+                            if image_size is not None:
+                                width, height = image_size
+                                if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
+                                    continue
                             x = (x1 + x2) // 2
                             y = (y1 + y2) // 2
                             words_loc.append([text, x, y])
@@ -175,21 +203,63 @@ class CaptchaSolver:
             print(f"Chaojiying error: {e}")
             return None
 
-    def _click_captcha(self, driver, target_element, words_loc, order_words):
-        """Execute Selenium clicks on the captcha image."""
-        from selenium.webdriver.common.action_chains import ActionChains
+    def _decode_image_size(self, image_content):
+        try:
+            from PIL import Image
+            import io
 
-        actions = ActionChains(driver)
+            with Image.open(io.BytesIO(image_content)) as image:
+                return image.size
+        except Exception:
+            return None
+
+    def _element_size(self, target_element):
+        size = getattr(target_element, "size", None) or {}
+        rect = getattr(target_element, "rect", None) or {}
+        width = size.get("width") or rect.get("width")
+        height = size.get("height") or rect.get("height")
+        if not width or not height:
+            raise ValueError("captcha element size unavailable")
+        return float(width), float(height)
+
+    def _click_offset(self, target_element, x, y, image_size=None):
+        x = _strict_int(x)
+        y = _strict_int(y)
+        element_width, element_height = self._element_size(target_element)
+
+        if image_size is not None:
+            if not _point_in_bounds(x, y, image_size):
+                raise ValueError("captcha coordinate out of image bounds")
+            image_width, image_height = image_size
+            rendered_x = x * element_width / image_width
+            rendered_y = y * element_height / image_height
+        else:
+            if not (0 <= x < element_width and 0 <= y < element_height):
+                raise ValueError("captcha coordinate out of element bounds")
+            rendered_x = x
+            rendered_y = y
+
+        return (
+            round(rendered_x - element_width / 2),
+            round(rendered_y - element_height / 2),
+        )
+
+    def _click_captcha(self, driver, target_element, words_loc, order_words, image_size=None, actions_class=None):
+        """Execute Selenium clicks on the captcha image."""
+        if actions_class is None:
+            from selenium.webdriver.common.action_chains import ActionChains
+            actions_class = ActionChains
+
+        actions = actions_class(driver)
 
         for target_char in order_words:
             for wl in words_loc:
                 if wl[0] == target_char:
-                    # Click at the position relative to the target element
-                    # Offset calculations based on original verify() function
+                    offset_x, offset_y = self._click_offset(target_element, wl[1], wl[2], image_size)
                     actions.move_to_element_with_offset(
                         target_element,
-                        int(wl[1]) - 160,
-                        int(wl[2]) - 72
+                        offset_x,
+                        offset_y,
                     ).click().perform()
                     break
 
@@ -209,6 +279,7 @@ class CaptchaSolver:
 
         try:
             target_element, order_words, image_content = self._get_captcha_info(driver)
+            image_size = self._decode_image_size(image_content)
             print(f"Target words: {order_words}")
 
             words_loc = None
@@ -246,7 +317,7 @@ class CaptchaSolver:
                 return log_str
 
             # Execute clicks
-            self._click_captcha(driver, target_element, words_loc, order_words)
+            self._click_captcha(driver, target_element, words_loc, order_words, image_size)
 
             print(f"安全验证成功 ({method_used})")
             log_str += f"安全验证成功\n"

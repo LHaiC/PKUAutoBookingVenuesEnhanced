@@ -337,10 +337,11 @@ def click_submit_order(driver):
 
 
 def verify(driver, glm_enabled, glm_endpoint, glm_timeout,
-           cy_username, cy_password, cy_soft_id):
+           cy_username, cy_password, cy_soft_id, allow_chaojiying_fallback=False):
     from captcha_solver import solve_captcha
     return solve_captcha(driver, glm_enabled, glm_endpoint, glm_timeout,
-                         cy_username, cy_password, cy_soft_id)
+                         cy_username, cy_password, cy_soft_id,
+                         allow_chaojiying_fallback)
 
 
 def click_pay(driver):

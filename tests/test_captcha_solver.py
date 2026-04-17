@@ -68,6 +68,30 @@ class FakeModel:
         return [[101, 102, 201, 202]]
 
 
+class FakeElement:
+    size = {"width": 224, "height": 179}
+    rect = {"width": 224, "height": 179}
+
+
+class FakeActions:
+    instances = []
+
+    def __init__(self, driver):
+        self.driver = driver
+        self.calls = []
+        FakeActions.instances.append(self)
+
+    def move_to_element_with_offset(self, element, x, y):
+        self.calls.append((element, x, y))
+        return self
+
+    def click(self):
+        return self
+
+    def perform(self):
+        return self
+
+
 class CaptchaSolverTests(unittest.TestCase):
     def make_solver(self):
         return CaptchaSolver(
@@ -83,6 +107,7 @@ class CaptchaSolverTests(unittest.TestCase):
         solver = self.make_solver()
         response = FakeResponse(
             {
+                "image_size": [30, 10],
                 "results": [
                     {"text": "叶", "x": 15, "y": 5, "bbox": [12, 2, 18, 8]},
                     {"text": "件", "x": 5, "y": 5, "bbox": [2, 2, 8, 8]},
@@ -108,6 +133,16 @@ class CaptchaSolverTests(unittest.TestCase):
 
         self.assertEqual(result, [["件", 5, 5]])
 
+    def test_parse_glm_result_rejects_out_of_bounds_xy(self):
+        solver = self.make_solver()
+
+        result = solver._parse_glm_result(
+            {"image_size": [30, 10], "results": [{"text": "件", "x": 30, "y": 5}]},
+            ["件"],
+        )
+
+        self.assertIsNone(result)
+
     def test_parse_glm_result_rejects_unsafe_numeric_values(self):
         solver = self.make_solver()
 
@@ -123,6 +158,35 @@ class CaptchaSolverTests(unittest.TestCase):
         )
 
         self.assertIsNone(result)
+
+    def test_click_captcha_scales_image_coordinates_to_element_offsets(self):
+        solver = self.make_solver()
+        FakeActions.instances = []
+
+        solver._click_captcha(
+            driver=object(),
+            target_element=FakeElement(),
+            words_loc=[["件", 224, 179]],
+            order_words=["件"],
+            image_size=(448, 358),
+            actions_class=FakeActions,
+        )
+
+        self.assertEqual(len(FakeActions.instances), 1)
+        self.assertEqual(FakeActions.instances[0].calls[0][1:], (0, 0))
+
+    def test_click_captcha_rejects_out_of_bounds_image_coordinates(self):
+        solver = self.make_solver()
+
+        with self.assertRaisesRegex(ValueError, "out of image bounds"):
+            solver._click_captcha(
+                driver=object(),
+                target_element=FakeElement(),
+                words_loc=[["件", 448, 179]],
+                order_words=["件"],
+                image_size=(448, 358),
+                actions_class=FakeActions,
+            )
 
     def test_glm_failure_does_not_fallback_by_default(self):
         class NoFallbackSolver(CaptchaSolver):
@@ -141,7 +205,7 @@ class CaptchaSolverTests(unittest.TestCase):
                 self.chaojiying_calls += 1
                 return [["件", 5, 5]]
 
-            def _click_captcha(self, driver, target_element, words_loc, order_words):
+            def _click_captcha(self, driver, target_element, words_loc, order_words, image_size=None):
                 self.clicks += 1
 
         solver = NoFallbackSolver()
@@ -177,7 +241,7 @@ class CaptchaSolverTests(unittest.TestCase):
                 self.chaojiying_calls += 1
                 return [["件", 5, 5]]
 
-            def _click_captcha(self, driver, target_element, words_loc, order_words):
+            def _click_captcha(self, driver, target_element, words_loc, order_words, image_size=None):
                 self.clicks += 1
 
         solver = FallbackSolver()
