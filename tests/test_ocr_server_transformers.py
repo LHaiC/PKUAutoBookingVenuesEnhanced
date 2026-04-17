@@ -228,6 +228,8 @@ class OcrServerTransformerTests(unittest.TestCase):
 
         self.assertEqual(response["results"], [])
         self.assertEqual(response["error"], "unsafe_ocr_output")
+        self.assertEqual(response["raw_output"], "识别结果：件叶结")
+        self.assertEqual(response["method"], "glm_ocr_transformers_with_local_positioning")
 
     def test_health_reports_unloaded_model(self):
         response = health()

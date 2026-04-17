@@ -27,7 +27,7 @@ from PIL import Image, ImageDraw
 import requests
 
 # GLM-OCR endpoint configuration
-GLM_ENDPOINT = "http://localhost:8000/glmocr/parse"
+GLM_ENDPOINT = os.environ.get("GLM_ENDPOINT", "http://localhost:8000/glmocr/parse")
 GLM_TIMEOUT = 10
 TEST_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "test.png")
 OUTPUT_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "test_output.png")
@@ -259,6 +259,7 @@ def main():
         img.save(OUTPUT_IMAGE_PATH)
         print(f"\nOriginal image saved to: {OUTPUT_IMAGE_PATH}")
         print("(No OCR results to annotate)")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

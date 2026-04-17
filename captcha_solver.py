@@ -221,6 +221,21 @@ class CaptchaSolver:
         except Exception:
             return None
 
+    def _match_ordered_targets(self, order_words, words_loc):
+        matched = []
+        used_indexes = set()
+
+        for target_char in order_words:
+            for idx, wl in enumerate(words_loc):
+                if idx in used_indexes:
+                    continue
+                if wl[0] == target_char:
+                    matched.append(wl)
+                    used_indexes.add(idx)
+                    break
+
+        return matched if len(matched) == len(order_words) else None
+
     def _element_size(self, target_element):
         size = getattr(target_element, "size", None) or {}
         rect = getattr(target_element, "rect", None) or {}
@@ -316,9 +331,8 @@ class CaptchaSolver:
                 for retry in range(3):
                     cy_result = self._solve_with_chaojiying(image_content, order_words)
                     if cy_result:
-                        # Filter to only include the order_words characters
-                        filtered = [wl for wl in cy_result if wl[0] in order_words]
-                        if len(filtered) == len(order_words):
+                        filtered = self._match_ordered_targets(order_words, cy_result)
+                        if filtered:
                             words_loc = filtered
                             method_used = "超级鹰"
                             print(f"超级鹰识别成功: {words_loc}")
@@ -330,6 +344,12 @@ class CaptchaSolver:
             if words_loc is None:
                 log_str += "安全验证失败：无法识别验证码\n"
                 print("安全验证失败：无法识别验证码")
+                raise CaptchaSolveError(log_str.rstrip())
+
+            returned_chars = [wl[0] for wl in words_loc]
+            if returned_chars != order_words:
+                log_str += f"安全验证失败：OCR返回顺序不匹配 {returned_chars}\n"
+                print(f"安全验证失败：OCR返回顺序不匹配 {returned_chars}")
                 raise CaptchaSolveError(log_str.rstrip())
 
             # Execute clicks

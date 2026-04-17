@@ -2,6 +2,9 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
+
+from PIL import Image
 
 import tests.test_glm_ocr as glm_ocr_script
 
@@ -61,6 +64,27 @@ class GlmOcrScriptTests(unittest.TestCase):
                 )
             finally:
                 glm_ocr_script.SAMPLE_DIR = original_sample_dir
+
+    def test_main_exits_nonzero_when_no_positions_are_returned(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_path = os.path.join(tmpdir, "captcha.png")
+            output_path = os.path.join(tmpdir, "output.png")
+            Image.new("RGB", (20, 20), "white").save(image_path)
+
+            with patch.object(
+                glm_ocr_script,
+                "find_latest_captured_sample",
+                return_value=(image_path, ["件"]),
+            ), patch.object(
+                glm_ocr_script,
+                "call_glm_ocr",
+                return_value={"results": [], "error": "unsafe_ocr_output"},
+            ), patch.object(glm_ocr_script, "OUTPUT_IMAGE_PATH", output_path):
+                with self.assertRaises(SystemExit) as exc:
+                    glm_ocr_script.main()
+
+            self.assertEqual(exc.exception.code, 1)
+            self.assertTrue(os.path.exists(output_path))
 
 
 if __name__ == "__main__":

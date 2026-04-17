@@ -343,6 +343,67 @@ class CaptchaSolverTests(unittest.TestCase):
         self.assertEqual(solver.chaojiying_calls, 1)
         self.assertEqual(solver.clicks, 1)
 
+    def test_solve_rejects_glm_result_when_click_order_does_not_match_targets(self):
+        class WrongOrderSolver(CaptchaSolver):
+            def __init__(self):
+                super().__init__(
+                    True,
+                    "http://localhost:8000",
+                    3,
+                    False,
+                    "",
+                    "",
+                    "",
+                )
+                self.clicks = 0
+
+            def _get_captcha_info(self, driver):
+                return object(), ["件", "叶"], b"image"
+
+            def _solve_with_glm(self, image_content, order_words):
+                return [["叶", 15, 5], ["件", 5, 5]]
+
+            def _click_captcha(self, driver, target_element, words_loc, order_words, image_size=None):
+                self.clicks += 1
+
+        solver = WrongOrderSolver()
+
+        with self.assertRaisesRegex(CaptchaSolveError, "顺序不匹配"):
+            solver.solve(driver=None)
+        self.assertEqual(solver.clicks, 0)
+
+    def test_chaojiying_fallback_orders_distinct_candidates_before_clicking(self):
+        class UnorderedFallbackSolver(CaptchaSolver):
+            def __init__(self):
+                super().__init__(
+                    True,
+                    "http://localhost:8000",
+                    3,
+                    True,
+                    "",
+                    "",
+                    "",
+                )
+                self.clicked_words_loc = None
+
+            def _get_captcha_info(self, driver):
+                return object(), ["件", "叶"], b"image"
+
+            def _solve_with_glm(self, image_content, order_words):
+                return None
+
+            def _solve_with_chaojiying(self, image_content, order_words):
+                return [["叶", 15, 5], ["件", 5, 5]]
+
+            def _click_captcha(self, driver, target_element, words_loc, order_words, image_size=None):
+                self.clicked_words_loc = words_loc
+
+        solver = UnorderedFallbackSolver()
+
+        solver.solve(driver=None)
+
+        self.assertEqual(solver.clicked_words_loc, [["件", 5, 5], ["叶", 15, 5]])
+
 
 class GlmOcrEngineTests(unittest.TestCase):
     def test_recognize_builds_transformers_request_without_real_model(self):

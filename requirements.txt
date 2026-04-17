@@ -1,3 +1,4 @@
+accelerate
 fastapi
 pillow
 pydantic

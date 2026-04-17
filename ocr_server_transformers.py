@@ -204,7 +204,14 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
         try:
             results = match_targets(targets, candidates, size)
         except MatchError as exc:
-            return {"results": [], "error": "unsafe_ocr_output", "detail": str(exc)}
+            return {
+                "results": [],
+                "error": "unsafe_ocr_output",
+                "detail": str(exc),
+                "image_size": list(size),
+                "method": "glm_ocr_transformers_with_local_positioning",
+                "raw_output": raw_output,
+            }
     else:
         results = raw_candidates
 
