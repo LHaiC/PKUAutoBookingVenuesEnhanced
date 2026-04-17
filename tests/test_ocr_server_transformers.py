@@ -25,7 +25,7 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(parsed[0]["confidence"], 0.94)
 
     def test_parse_model_output_extracts_single_chinese_characters(self):
-        parsed = parse_model_output("识别结果：件 叶 结")
+        parsed = parse_model_output("识别结果：件叶结")
         self.assertEqual(
             parsed,
             [

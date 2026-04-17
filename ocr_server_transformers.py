@@ -46,7 +46,8 @@ def parse_model_output(output: str) -> list[dict]:
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
 
-    chars = re.findall(r"(?<![\u4e00-\u9fff])([\u4e00-\u9fff])(?![\u4e00-\u9fff])", output)
+    text_segment = re.split(r"[:：]", output)[-1]
+    chars = re.findall(r"[\u4e00-\u9fff]", text_segment)
     return [{"text": char, "bbox": [], "confidence": 0.50} for char in chars]
 
 
