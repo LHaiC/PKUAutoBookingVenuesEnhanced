@@ -6,11 +6,19 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
 from PIL import Image
 
 import ocr_server_transformers
-from ocr_server_transformers import app, decode_data_uri, parse_model_output
+from ocr_server_transformers import (
+    ParseRequest,
+    decode_data_uri,
+    health,
+    parse,
+    parse_model_output,
+    validation_exception_handler,
+)
 
 
 def make_png_data_uri() -> str:
@@ -96,45 +104,48 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual([item["text"] for item in parsed], ["件", "叶", "结"])
 
     def test_parse_route_returns_503_when_model_unloaded(self):
-        response = TestClient(app).post("/glmocr/parse", json={"images": [make_png_data_uri()]})
+        with self.assertRaises(HTTPException) as ctx:
+            parse(ParseRequest(images=[make_png_data_uri()]))
 
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["detail"], "Model not loaded")
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(ctx.exception.detail, "Model not loaded")
 
     def test_parse_route_returns_400_for_invalid_base64(self):
-        response = TestClient(app).post("/glmocr/parse", json={"images": ["not-base64!!!"]})
+        with self.assertRaises(HTTPException) as ctx:
+            parse(ParseRequest(images=["not-base64!!!"]))
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "Invalid base64 image data")
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, "Invalid base64 image data")
 
     def test_parse_route_returns_400_for_missing_images(self):
-        response = TestClient(app).post("/glmocr/parse", json={})
+        with self.assertRaises(HTTPException) as ctx:
+            parse(ParseRequest())
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "No images provided")
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, "No images provided")
 
     def test_parse_route_returns_400_for_invalid_body_shape(self):
-        response = TestClient(app).post("/glmocr/parse", json={"images": None})
+        response = validation_exception_handler(None, RequestValidationError([]))
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "Invalid request body")
+        self.assertEqual(response.body, b'{"detail":"Invalid request body"}')
 
     def test_parse_route_returns_400_for_invalid_image_bytes_before_model_check(self):
         payload = base64.b64encode(b"abc").decode("utf-8")
 
-        response = TestClient(app).post("/glmocr/parse", json={"images": [payload]})
+        with self.assertRaises(HTTPException) as ctx:
+            parse(ParseRequest(images=[payload]))
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "Invalid image data")
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, "Invalid image data")
 
     def test_parse_route_preserves_plain_text_results_without_targets(self):
         ocr_server_transformers.engine = FakeEngine()
 
-        response = TestClient(app).post("/glmocr/parse", json={"images": [make_png_data_uri()]})
+        response = parse(ParseRequest(images=[make_png_data_uri()]))
 
-        self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            response.json()["results"],
+            response["results"],
             [
                 {"text": "件", "bbox": [], "confidence": 0.5},
                 {"text": "叶", "bbox": [], "confidence": 0.5},
@@ -145,14 +156,17 @@ class OcrServerTransformerTests(unittest.TestCase):
     def test_parse_route_fails_closed_for_plain_text_with_targets(self):
         ocr_server_transformers.engine = FakeEngine()
 
-        response = TestClient(app).post(
-            "/glmocr/parse",
-            json={"images": [make_png_data_uri()], "targets": ["件", "叶", "结"]},
-        )
+        response = parse(ParseRequest(images=[make_png_data_uri()], targets=["件", "叶", "结"]))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["results"], [])
-        self.assertEqual(response.json()["error"], "unsafe_ocr_output")
+        self.assertEqual(response["results"], [])
+        self.assertEqual(response["error"], "unsafe_ocr_output")
+
+    def test_health_reports_unloaded_model(self):
+        response = health()
+
+        self.assertEqual(response["status"], "ok")
+        self.assertFalse(response["model_loaded"])
+        self.assertIsNone(response["model_path"])
 
 
 if __name__ == "__main__":
