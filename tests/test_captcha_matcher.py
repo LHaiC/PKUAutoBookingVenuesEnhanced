@@ -1,0 +1,57 @@
+import unittest
+
+from captcha_matcher import Candidate, MatchError, bbox_center, match_targets
+
+
+class CaptchaMatcherTests(unittest.TestCase):
+    def test_bbox_center_uses_integer_midpoint(self):
+        self.assertEqual(bbox_center([10, 20, 30, 50]), (20, 35))
+
+    def test_match_targets_returns_requested_order(self):
+        candidates = [
+            Candidate(text="结", bbox=[70, 120, 130, 170], confidence=0.91),
+            Candidate(text="件", bbox=[140, 50, 190, 110], confidence=0.94),
+            Candidate(text="叶", bbox=[230, 90, 285, 140], confidence=0.89),
+        ]
+
+        matched = match_targets(["件", "叶", "结"], candidates, image_size=(448, 358))
+
+        self.assertEqual(
+            matched,
+            [
+                {"text": "件", "bbox": [140, 50, 190, 110], "confidence": 0.94},
+                {"text": "叶", "bbox": [230, 90, 285, 140], "confidence": 0.89},
+                {"text": "结", "bbox": [70, 120, 130, 170], "confidence": 0.91},
+            ],
+        )
+
+    def test_missing_target_raises(self):
+        candidates = [Candidate(text="件", bbox=[140, 50, 190, 110], confidence=0.94)]
+
+        with self.assertRaisesRegex(MatchError, "missing target: 叶"):
+            match_targets(["件", "叶"], candidates, image_size=(448, 358))
+
+    def test_duplicate_target_raises(self):
+        candidates = [
+            Candidate(text="件", bbox=[140, 50, 190, 110], confidence=0.94),
+            Candidate(text="件", bbox=[200, 50, 250, 110], confidence=0.93),
+        ]
+
+        with self.assertRaisesRegex(MatchError, "ambiguous target: 件"):
+            match_targets(["件"], candidates, image_size=(448, 358))
+
+    def test_low_confidence_raises(self):
+        candidates = [Candidate(text="件", bbox=[140, 50, 190, 110], confidence=0.20)]
+
+        with self.assertRaisesRegex(MatchError, "low confidence: 件"):
+            match_targets(["件"], candidates, image_size=(448, 358), min_confidence=0.50)
+
+    def test_out_of_bounds_bbox_raises(self):
+        candidates = [Candidate(text="件", bbox=[140, 50, 999, 110], confidence=0.94)]
+
+        with self.assertRaisesRegex(MatchError, "bbox out of bounds: 件"):
+            match_targets(["件"], candidates, image_size=(448, 358))
+
+
+if __name__ == "__main__":
+    unittest.main()
