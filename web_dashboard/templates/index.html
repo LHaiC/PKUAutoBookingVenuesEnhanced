@@ -33,6 +33,19 @@
     <h1>PKU 场馆预约控制台</h1>
 
     <section>
+        <h2>配置文件列表</h2>
+        <div class="actions">
+            <button onclick="loadConfigList()">刷新配置列表</button>
+        </div>
+        <div id="config-list-feedback" class="status"></div>
+        <table>
+            <thead><tr><th>配置</th><th>场馆</th><th>预约时间</th><th>操作</th></tr></thead>
+            <tbody id="configs-body"></tbody>
+        </table>
+        <p class="small">这里列出 config.ini、config_*.ini 和 configs/*.ini。点“加载”会进入编辑区，点“添加为任务”会保存到任务列表。</p>
+    </section>
+
+    <section>
         <h2>本地配置</h2>
         <div class="grid">
             <div>
@@ -107,6 +120,8 @@
             <button onclick="startScheduler()">启动调度器</button>
             <button onclick="stopScheduler()" class="danger">停止调度器</button>
         </div>
+        <div id="task-feedback" class="status"></div>
+        <div id="scheduler-summary" class="status"></div>
         <table>
             <thead><tr><th>启用</th><th>任务</th><th>配置</th><th>场馆</th><th>预约时间</th><th>开跑时间</th><th>重试</th><th>操作</th></tr></thead>
             <tbody id="tasks-body"></tbody>
@@ -136,6 +151,66 @@ let tasks = [];
 
 function key(section, option) { return `${section}.${option}`; }
 function fieldId(section, option) { return `field-${section}-${option}`; }
+function setMessage(id, message) { document.getElementById(id).textContent = message; }
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+async function fetchJson(url, options) {
+    const res = await fetch(url, options);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || data.message || `HTTP ${res.status}`);
+    return data;
+}
+
+async function loadConfigList() {
+    setMessage("config-list-feedback", "正在读取配置列表...");
+    try {
+        const data = await fetchJson("/api/configs");
+        renderConfigList(data.configs || []);
+        setMessage("config-list-feedback", `已读取 ${data.configs.length} 个配置`);
+    } catch (error) {
+        setMessage("config-list-feedback", `读取配置列表失败：${error.message}`);
+    }
+}
+
+function renderConfigList(configs) {
+    const body = document.getElementById("configs-body");
+    body.innerHTML = "";
+    configs.forEach(config => {
+        const tr = document.createElement("tr");
+        const bookingTime = config.start_time || config.end_time
+            ? `${config.start_time || "?"} -> ${config.end_time || "?"}`
+            : (config.error || "未设置时间");
+        tr.innerHTML = `
+            <td>${escapeHtml(config.path)}</td>
+            <td>${escapeHtml(config.venue || "-")}</td>
+            <td>${escapeHtml(bookingTime)}</td>
+            <td>
+                <button onclick="loadListedConfig('${escapeHtml(config.path)}')">加载</button>
+                <button class="secondary" onclick="addTaskForConfig('${escapeHtml(config.path)}', '${escapeHtml(config.venue)}', '${escapeHtml(config.start_time)}')">添加为任务</button>
+            </td>`;
+        body.appendChild(tr);
+    });
+}
+
+async function loadListedConfig(path) {
+    document.getElementById("config-path").value = path;
+    await loadConfig();
+    setMessage("config-list-feedback", `已加载 ${path}`);
+}
+
+async function addTaskForConfig(path, venue, startTime) {
+    document.getElementById("task-config").value = path;
+    document.getElementById("task-name").value = `${venue || path} ${startTime || ""}`.trim();
+    addTask();
+    await saveTasks(`已添加并保存任务：${path}`);
+}
 
 function renderFields(values) {
     const root = document.getElementById("config-fields");
@@ -155,9 +230,9 @@ function renderFields(values) {
 
 async function loadConfig() {
     const path = document.getElementById("config-path").value || "config.ini";
-    const res = await fetch(`/api/config?path=${encodeURIComponent(path)}`);
-    const data = await res.json();
+    const data = await fetchJson(`/api/config?path=${encodeURIComponent(path)}`);
     document.getElementById("config-path").value = data.path;
+    document.getElementById("task-config").value = data.path;
     renderFields(data.values);
 }
 
@@ -178,11 +253,11 @@ function collectConfigValues() {
 
 async function saveConfig() {
     const payload = {path: document.getElementById("config-path").value || "config.ini", values: collectConfigValues()};
-    const res = await fetch("/api/config", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
-    const data = await res.json();
+    const data = await fetchJson("/api/config", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
     renderFields(data.values);
     document.getElementById("task-config").value = data.path;
     document.getElementById("status").textContent = `已保存 ${data.path}`;
+    await loadConfigList();
     return data;
 }
 
@@ -244,8 +319,7 @@ function applySlotRange() {
 async function runNow() {
     const payload = {config: document.getElementById("config-path").value || "config.ini", browser: document.getElementById("browser").value};
     document.getElementById("status").textContent = "运行中";
-    const res = await fetch("/api/run", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
-    const data = await res.json();
+    const data = await fetchJson("/api/run", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
     document.getElementById("status").textContent = `returncode=${data.returncode}\n${data.stdout}\n${data.stderr}`;
 }
 
@@ -258,14 +332,14 @@ function renderTasks() {
             ? `${task.booking_start_time || "?"} -> ${task.booking_end_time || "?"}`
             : (task.error || "未能解析配置");
         tr.innerHTML = `
-            <td><input type="checkbox" ${task.enabled ? "checked" : ""} onchange="tasks[${index}].enabled=this.checked"></td>
+            <td><input type="checkbox" ${task.enabled ? "checked" : ""} onchange="toggleTaskEnabled(${index}, this.checked)"></td>
             <td><input value="${task.name || ""}" onchange="tasks[${index}].name=this.value"></td>
             <td><input value="${task.config || "config.ini"}" onchange="tasks[${index}].config=this.value"></td>
             <td>${task.venue || "-"}</td>
             <td>${bookingTime}</td>
             <td>${task.run_after || "-"}</td>
             <td>${task.max_attempts || 120} 次 / ${task.interval_seconds || 5} 秒</td>
-            <td><button class="danger" onclick="tasks.splice(${index},1);renderTasks()">删除</button></td>`;
+            <td><button class="danger" onclick="deleteTask(${index})">删除</button></td>`;
         body.appendChild(tr);
     });
 }
@@ -282,44 +356,83 @@ function addTask() {
         enabled: true
     });
     renderTasks();
+    setMessage("task-feedback", "已添加任务，点击“保存任务”后写入 tasks.json");
 }
 
 async function loadTasks() {
-    const res = await fetch("/api/tasks");
-    tasks = (await res.json()).tasks || [];
+    const data = await fetchJson("/api/tasks");
+    tasks = data.tasks || [];
     renderTasks();
 }
 
-async function saveTasks() {
-    const res = await fetch("/api/tasks", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({tasks})});
-    tasks = (await res.json()).tasks || [];
+async function saveTasks(message = "任务已保存") {
+    setMessage("task-feedback", "正在保存任务...");
+    try {
+        const data = await fetchJson("/api/tasks", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({tasks})});
+        tasks = data.tasks || [];
+        renderTasks();
+        setMessage("task-feedback", `${message}（${tasks.length} 个任务）`);
+        await refreshStatus();
+    } catch (error) {
+        setMessage("task-feedback", `保存任务失败：${error.message}`);
+        throw error;
+    }
+}
+
+async function toggleTaskEnabled(index, enabled) {
+    tasks[index].enabled = enabled;
+    await saveTasks(enabled ? "任务已启用" : "任务已暂停");
+}
+
+async function deleteTask(index) {
+    const removed = tasks.splice(index, 1)[0];
     renderTasks();
-    refreshStatus();
+    await saveTasks(`已删除任务：${removed.name || removed.config}`);
 }
 
 async function startScheduler() {
-    await saveTasks();
-    await fetch("/api/scheduler/start", {method: "POST"});
-    refreshStatus();
+    setMessage("task-feedback", "正在保存任务并启动调度器...");
+    try {
+        await saveTasks();
+        const data = await fetchJson("/api/scheduler/start", {method: "POST"});
+        const detail = data.pid ? `PID=${data.pid}` : (data.message || "已启动");
+        setMessage("task-feedback", `调度器已启动：${detail}`);
+        await refreshStatus();
+    } catch (error) {
+        setMessage("task-feedback", `启动调度器失败：${error.message}`);
+    }
 }
 
 async function stopScheduler() {
-    await fetch("/api/scheduler/stop", {method: "POST"});
-    refreshStatus();
+    setMessage("task-feedback", "正在停止调度器...");
+    try {
+        const data = await fetchJson("/api/scheduler/stop", {method: "POST"});
+        setMessage("task-feedback", data.message || "调度器已停止");
+        await refreshStatus();
+    } catch (error) {
+        setMessage("task-feedback", `停止调度器失败：${error.message}`);
+    }
 }
 
 async function refreshStatus() {
-    const res = await fetch("/api/status");
-    document.getElementById("status").textContent = JSON.stringify(await res.json(), null, 2);
+    const data = await fetchJson("/api/status");
+    document.getElementById("status").textContent = JSON.stringify(data, null, 2);
+    const scheduler = data.scheduler || {};
+    const state = data.scheduler_running ? "运行中" : "已停止";
+    const pid = scheduler.pid ? `，PID=${scheduler.pid}` : "";
+    const updated = scheduler.updated_at ? `，更新时间=${scheduler.updated_at}` : "";
+    const task = scheduler.task_name ? `，最近任务=${scheduler.task_name}` : "";
+    const attempt = scheduler.attempt ? `，尝试=${scheduler.attempt}` : "";
+    setMessage("scheduler-summary", `调度器：${state}${pid}${updated}${task}${attempt}`);
 }
 
 async function refreshLogs() {
     const config = document.getElementById("config-path").value || "config.ini";
-    const res = await fetch(`/api/logs?config=${encodeURIComponent(config)}`);
-    const data = await res.json();
+    const data = await fetchJson(`/api/logs?config=${encodeURIComponent(config)}`);
     document.getElementById("logs").textContent = (data.lines || []).join("\n");
 }
 
+loadConfigList();
 loadConfig();
 loadTasks();
 refreshStatus();

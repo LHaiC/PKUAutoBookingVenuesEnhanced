@@ -270,9 +270,10 @@ http://127.0.0.1:5000
 WebUI 能做的事：
 
 - 读取、编辑、保存本地 `config.ini` 或其他项目内配置文件。
+- 可视化列出 `config.ini`、`config_*.ini` 和 `configs/*.ini`，并可一键加载或添加为任务。
 - 用“日期或星期 / 开始时间 / 至少几小时”生成 `[time] start_time/end_time`；原始时间字段折叠在“高级时间配置”里，供多个候选时段手动编辑。
 - 创建多个未来预约任务。任务只指向 config，场馆和预约时间会从 config 自动解析显示。
-- 启动/停止本地 `booking_scheduler.py`。
+- 启动/停止本地 `booking_scheduler.py`，并显示 PID、运行状态和最近任务反馈。
 - 查看最近运行状态和配置对应日志。
 
 如果希望打包成单文件启动器：

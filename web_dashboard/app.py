@@ -101,6 +101,42 @@ def read_json_file(path, fallback):
         return fallback
 
 
+def config_summary(path):
+    conf = configparser.ConfigParser()
+    conf.read(path, encoding="utf8")
+    return {
+        "path": str(path.relative_to(ROOT_DIR)),
+        "venue": conf.get("type", "venue", fallback=""),
+        "venue_num": conf.get("type", "venue_num", fallback="-1"),
+        "start_time": conf.get("time", "start_time", fallback=""),
+        "end_time": conf.get("time", "end_time", fallback=""),
+    }
+
+
+def list_config_files():
+    candidates = []
+    for path in [ROOT_DIR / "config.ini", *ROOT_DIR.glob("config_*.ini"), *(ROOT_DIR / "configs").glob("*.ini")]:
+        if path.exists() and path.name != "config.example.ini":
+            candidates.append(path.resolve())
+    unique = sorted(set(candidates), key=lambda item: str(item.relative_to(ROOT_DIR)))
+    configs = []
+    for path in unique:
+        try:
+            summary = config_summary(path)
+            summary["error"] = None
+        except Exception as exc:
+            summary = {
+                "path": str(path.relative_to(ROOT_DIR)),
+                "venue": "",
+                "venue_num": "",
+                "start_time": "",
+                "end_time": "",
+                "error": str(exc),
+            }
+        configs.append(summary)
+    return configs
+
+
 def scheduler_pid():
     try:
         return int(SCHEDULER_PID_FILE.read_text(encoding="utf-8").strip())
@@ -132,6 +168,11 @@ def config_api():
     return jsonify(write_config(payload.get("path", "config.ini"), payload.get("values", {})))
 
 
+@app.route("/api/configs")
+def configs_api():
+    return jsonify({"configs": list_config_files()})
+
+
 @app.route("/api/tasks", methods=["GET", "POST"])
 def tasks_api():
     if request.method == "GET":
@@ -144,10 +185,15 @@ def tasks_api():
 
 @app.route("/api/status")
 def status_api():
+    scheduler = read_json_file(SCHEDULER_STATUS_FILE, {"status": "stopped"})
+    pid = scheduler_pid()
+    running = scheduler_running()
+    if pid and running:
+        scheduler["pid"] = pid
     return jsonify({
         "booking": read_json_file(STATUS_FILE, {"status": "unknown", "last_run": None}),
-        "scheduler": read_json_file(SCHEDULER_STATUS_FILE, {"status": "stopped"}),
-        "scheduler_running": scheduler_running(),
+        "scheduler": scheduler,
+        "scheduler_running": running,
     })
 
 

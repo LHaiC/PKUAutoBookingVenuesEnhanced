@@ -18,6 +18,15 @@ class WebUiTemplateTests(unittest.TestCase):
         self.assertIn('id="advanced-start-time"', template)
         self.assertIn('id="advanced-end-time"', template)
 
+    def test_task_controls_have_visible_feedback_targets(self):
+        with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
+            template = f.read()
+
+        self.assertIn('id="config-list-feedback"', template)
+        self.assertIn('id="task-feedback"', template)
+        self.assertIn('id="scheduler-summary"', template)
+        self.assertIn('id="configs-body"', template)
+
 
 if __name__ == "__main__":
     unittest.main()
