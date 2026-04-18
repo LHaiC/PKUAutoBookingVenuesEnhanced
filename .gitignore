@@ -1,8 +1,14 @@
 __pycache__
 run*.bat
 docs/
-CLAUDE.md.worktrees/
+CLAUDE.md
 .worktrees/
 models/
 *.log
 tests/test_output.png
+.codex
+config.ini
+tasks.json
+status.json
+scheduler_status.json
+.scheduler.pid

@@ -1,5 +1,7 @@
 accelerate
 fastapi
+flask
+huggingface_hub
 pillow
 pydantic
 pytest

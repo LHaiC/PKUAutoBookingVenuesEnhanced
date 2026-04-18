@@ -9,15 +9,12 @@ except ModuleNotFoundError:
 from urllib.parse import quote
 import time
 import datetime
-import os
 import warnings
 from chaojiying import *
 import base64
 import re
 
 warnings.filterwarnings('ignore')
-
-PAYMENT_DEBUG_DIR = "models/payment_debug"
 
 
 VENUE_ALIASES = {
@@ -318,12 +315,14 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
             trs_list.append(trs[i].find_elements(By.TAG_NAME, 'td'))
         # print(len(trs_list))
         if len(trs_list) == 0:
-            return False, -1, 0
+            return False, -1
         # print(len(trs_list[0]))
         # print(len(trs_list[1]))
         # print(len(trs_list[2]))
         # print(venue_num_click, time_num)
         if venue_num_click != -1:
+            if venue_num_click < 1:
+                return False, venue_num_click
             class_name = trs_list[venue_num_click - 1][time_num].find_element(By.TAG_NAME,
                                                                               'div').get_attribute("class")
             print(class_name)
@@ -338,7 +337,7 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
                                                                 'div').get_attribute("class")
                 print(class_name)
                 if class_name.split()[2] == 'free':
-                    venue_num_click = i
+                    venue_num_click = i + 1
                     trs_list[i][time_num].find_element(By.TAG_NAME, 'div').click()
                     return True, venue_num_click
 
@@ -383,22 +382,20 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
         status, venue_num = click_free(venue_num, time_num_current)
 
         if status:
-            log_str += "找到空闲场地，场地编号为%d\n" % venue_num
-            print("找到空闲场地，场地编号为%d\n" % venue_num)
-            if slot_count >= 2:
-                # 尝试订第二个连续slot（同一场地，下一个小时）
-                next_time_num = time_num_current + 1
-                status2, venue_num2 = click_free(venue_num, next_time_num)
-                if status2:
-                    # 注意：不同时间槽可能分配到不同场地号，需验证一致性
-                    if venue_num2 != venue_num:
-                        log_str += f"[警告] 第二小时场地号({venue_num2})与第一小时({venue_num})不一致\n"
-                        print(f"[警告] 第二小时场地号({venue_num2})与第一小时({venue_num})不一致\n")
-                    else:
-                        log_str += f"找到第二个连续空闲场地，场地编号为{venue_num2}\n"
-                        print(f"找到第二个连续空闲场地，场地编号为{venue_num2}\n")
-                    # 注意：本函数仅返回第一个场地的 venue_num。
-                    # 若需同时通知两小时的场地/时间，需修改返回值接口或依赖上述日志。
+            selected_venue_num = venue_num
+            log_str += "找到空闲场地，场地编号为%d\n" % selected_venue_num
+            print("找到空闲场地，场地编号为%d\n" % selected_venue_num)
+            for slot_offset in range(1, slot_count):
+                status_next, venue_num_next = click_free(selected_venue_num, time_num_current + slot_offset)
+                if not status_next or venue_num_next != selected_venue_num:
+                    status = False
+                    log_str += "连续%d小时场地不足\n" % slot_count
+                    print("连续%d小时场地不足\n" % slot_count)
+                    break
+                log_str += "找到第%d个连续空闲场地，场地编号为%d\n" % (slot_offset + 1, selected_venue_num)
+                print("找到第%d个连续空闲场地，场地编号为%d\n" % (slot_offset + 1, selected_venue_num))
+            if not status:
+                continue
             now = datetime.datetime.now()
             today = datetime.datetime.strptime(str(now)[:10], "%Y-%m-%d")
             date = today + datetime.timedelta(days=delta_day)
@@ -423,21 +420,6 @@ def click_book(driver):
                         '/html/body/div[1]/div/div/div[3]/div[2]/div/div[1]/div[2]/div[5]/div[2]/div[1]').click()
     print("确定预约成功")
     log_str += "确定预约成功\n"
-    return log_str
-
-
-def click_submit_order(driver):
-    print("提交订单")
-    log_str = "提交订单\n"
-    driver.switch_to.window(driver.window_handles[-1])
-    WebDriverWait(driver, 10).until_not(
-        EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
-    time.sleep(3)
-    driver.find_element(By.XPATH,
-                        '/html/body/div[1]/div/div/div[3]/div[2]/div/div[2]/div[2]/div[1]').click()
-    # result = EC.alert_is_present()(driver)
-    print("提交订单成功")
-    log_str += "提交订单成功\n"
     return log_str
 
 
@@ -466,35 +448,13 @@ def _element_area(element):
     return width * height
 
 
-def _payment_debug_snapshot(driver, reason, output_dir=PAYMENT_DEBUG_DIR):
-    os.makedirs(output_dir, exist_ok=True)
-    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    html_path = os.path.join(output_dir, f"payment-{reason}-{stamp}.html")
-    screenshot_path = os.path.join(output_dir, f"payment-{reason}-{stamp}.png")
-
-    try:
-        with open(html_path, "w", encoding="utf-8") as f:
-            f.write(getattr(driver, "page_source", ""))
-        print(f"已保存付款页面调试快照: {html_path}")
-    except Exception as exc:
-        print(f"保存付款页面HTML失败: {exc}")
-
-    try:
-        driver.save_screenshot(screenshot_path)
-        print(f"已保存付款页面截图: {screenshot_path}")
-    except Exception as exc:
-        print(f"保存付款页面截图失败: {exc}")
-
-
-def campus_card_payment_candidates(driver):
+def submit_order_candidates(driver):
     locators = [
-        "//*[contains(normalize-space(.), '校园卡') and "
-        "(contains(normalize-space(.), '支付') or contains(normalize-space(.), '付款'))]",
-        "//*[contains(normalize-space(.), '校园卡')]",
+        "//*[self::button or self::div or self::a][normalize-space(.)='提交' and not(contains(@class, 'cancel'))]",
+        '/html/body/div[1]/div/div/div[3]/div[2]/div/div[2]/div[2]/div[1]',
     ]
     candidates = []
     seen = set()
-
     for xpath in locators:
         try:
             elements = driver.find_elements(By.XPATH, xpath)
@@ -504,31 +464,28 @@ def campus_card_payment_candidates(driver):
             if id(element) in seen or not _element_is_displayed(element):
                 continue
             text = _element_payment_text(element)
-            if "校园卡" not in text:
+            if text and text != "提交":
                 continue
             seen.add(id(element))
             candidates.append(element)
-
-    candidates.sort(
-        key=lambda element: (
-            0 if any(word in _element_payment_text(element) for word in ("支付", "付款")) else 1,
-            _element_area(element) or 10**9,
-        )
-    )
+    candidates.sort(key=lambda element: _element_area(element) or 10**9)
     return candidates
 
 
-def click_campus_card_payment(driver, timeout=10, poll_interval=0.2):
+def click_submit_order(driver, timeout=10, poll_interval=0.2):
+    print("提交订单")
+    log_str = "提交订单\n"
     driver.switch_to.window(driver.window_handles[-1])
     try:
         WebDriverWait(driver, 10).until_not(
             EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
     except Exception:
         pass
+    time.sleep(0.5)
 
     deadline = time.time() + timeout
     while True:
-        candidates = campus_card_payment_candidates(driver)
+        candidates = submit_order_candidates(driver)
         if candidates:
             element = candidates[0]
             try:
@@ -540,12 +497,14 @@ def click_campus_card_payment(driver, timeout=10, poll_interval=0.2):
                 element.click()
             except Exception:
                 driver.execute_script('arguments[0].click();', element)
-            return element
-
+            break
         if time.time() >= deadline:
-            _payment_debug_snapshot(driver, "campus-card-not-found")
-            raise RuntimeError("找不到校园卡付款入口")
+            raise RuntimeError("找不到提交订单按钮")
         time.sleep(poll_interval)
+    # result = EC.alert_is_present()(driver)
+    print("提交订单成功")
+    log_str += "提交订单成功\n"
+    return log_str
 
 
 def verify(driver, glm_enabled, glm_endpoint, glm_timeout,
@@ -556,17 +515,12 @@ def verify(driver, glm_enabled, glm_endpoint, glm_timeout,
                          cy_soft_id)
 
 
-def click_pay(driver, auto_campus_card_pay=False, timeout=10, manual_wait_seconds=30):
+def click_pay(driver, manual_wait_seconds=30):
     print("付款（校园卡）")
     log_str = "付款（校园卡）\n"
-    if auto_campus_card_pay:
-        click_campus_card_payment(driver, timeout=timeout)
-        print("已自动点击校园卡付款入口")
-        log_str += "已自动点击校园卡付款入口\n"
-    else:
-        time.sleep(manual_wait_seconds)
-        print("需要用户自行付款")
-        log_str += "需要用户自行付款\n"
+    time.sleep(manual_wait_seconds)
+    print("订单已提交，需要用户自行付款")
+    log_str += "订单已提交，需要用户自行付款\n"
     return log_str
 
 

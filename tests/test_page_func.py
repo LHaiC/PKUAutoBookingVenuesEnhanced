@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from page_func import (
     booking_venue_kind,
-    click_campus_card_payment,
     click_pay,
+    click_submit_order,
     time_column_from_rows,
     venue_card_xpath,
 )
@@ -97,32 +97,23 @@ class PageFuncTests(unittest.TestCase):
 
         self.assertIsNone(time_column_from_rows(rows, start_time))
 
-    def test_click_campus_card_payment_clicks_visible_payment_option(self):
-        campus_card = FakePaymentElement("校园卡付款")
-        driver = FakePaymentDriver([campus_card])
-
-        clicked = click_campus_card_payment(driver, timeout=0, poll_interval=0)
-
-        self.assertIs(clicked, campus_card)
-        self.assertTrue(campus_card.clicked)
-
     def test_click_pay_waits_for_manual_payment_by_default(self):
         campus_card = FakePaymentElement("校园卡付款")
         driver = FakePaymentDriver([campus_card])
 
-        log = click_pay(driver, auto_campus_card_pay=False, manual_wait_seconds=0)
+        log = click_pay(driver, manual_wait_seconds=0)
 
         self.assertFalse(campus_card.clicked)
-        self.assertIn("需要用户自行付款", log)
+        self.assertIn("订单已提交，需要用户自行付款", log)
 
-    def test_click_pay_auto_mode_raises_when_campus_card_option_missing(self):
-        with self.assertRaisesRegex(RuntimeError, "校园卡"):
-            click_pay(
-                FakePaymentDriver([]),
-                auto_campus_card_pay=True,
-                timeout=0,
-                manual_wait_seconds=0,
-            )
+    def test_click_submit_order_clicks_visible_submit_button(self):
+        submit = FakePaymentElement("提交")
+        driver = FakePaymentDriver([submit])
+
+        log = click_submit_order(driver, timeout=0)
+
+        self.assertTrue(submit.clicked)
+        self.assertIn("提交订单成功", log)
 
 
 if __name__ == "__main__":

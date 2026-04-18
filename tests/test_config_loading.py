@@ -14,8 +14,7 @@ class ConfigLoadingTests(unittest.TestCase):
     def test_example_config_loads_without_duration(self):
         values = load_config("config.example.ini")
 
-        self.assertEqual(len(values), 16)
-        self.assertFalse(values[-2])
+        self.assertEqual(len(values), 15)
         self.assertFalse(values[-1])
 
     def test_booking_entry_points_are_importable_without_selenium_installed(self):

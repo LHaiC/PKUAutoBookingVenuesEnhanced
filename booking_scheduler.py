@@ -1,0 +1,184 @@
+from __future__ import annotations
+
+import argparse
+import configparser
+import datetime as dt
+import json
+import os
+import subprocess
+import sys
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+
+
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+TASKS_FILE = os.path.join(ROOT_DIR, "tasks.json")
+SCHEDULER_STATUS_FILE = os.path.join(ROOT_DIR, "scheduler_status.json")
+
+
+def load_tasks(path=TASKS_FILE):
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, dict):
+        return data.get("tasks", [])
+    return data
+
+
+def save_tasks(tasks, path=TASKS_FILE):
+    payload = {"tasks": tasks}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def normalize_task(task):
+    normalized = dict(task)
+    normalized.setdefault("id", uuid.uuid4().hex[:12])
+    normalized.setdefault("name", normalized.get("config", "config.ini"))
+    normalized.setdefault("config", "config.ini")
+    normalized.setdefault("browser", "firefox")
+    normalized.setdefault("enabled", True)
+    normalized.setdefault("lead_seconds", 60)
+    normalized.setdefault("interval_seconds", 5)
+    normalized.setdefault("max_attempts", 120)
+    normalized.setdefault("timeout_seconds", 180)
+    return normalized
+
+
+def target_date_from_token(token, today=None):
+    today = today or dt.date.today()
+    date_part = token.split("-", 1)[0].strip()
+    if len(date_part) == 8:
+        return dt.datetime.strptime(date_part, "%Y%m%d").date()
+    weekday = int(date_part)
+    if weekday < 1 or weekday > 7:
+        raise ValueError(f"weekday must be 1-7: {token}")
+    delta_days = (weekday - 1 - today.weekday()) % 7
+    return today + dt.timedelta(days=delta_days)
+
+
+def release_datetime_for_token(token, today=None):
+    target_date = target_date_from_token(token, today)
+    release_date = target_date - dt.timedelta(days=3)
+    return dt.datetime.combine(release_date, dt.time(12, 0))
+
+
+def start_tokens_for_task(task):
+    start_time = task.get("start_time")
+    if not start_time:
+        config_path = os.path.join(ROOT_DIR, task.get("config", "config.ini"))
+        conf = configparser.ConfigParser()
+        conf.read(config_path, encoding="utf8")
+        start_time = conf["time"]["start_time"]
+    return [token.strip() for token in start_time.split("/") if token.strip()]
+
+
+def earliest_release_datetime(task, today=None):
+    releases = [release_datetime_for_token(token, today) for token in start_tokens_for_task(task)]
+    if not releases:
+        raise ValueError("task has no start_time")
+    return min(releases)
+
+
+def task_due(task, now=None):
+    task = normalize_task(task)
+    if not task.get("enabled", True):
+        return False
+    now = now or dt.datetime.now()
+    release_at = earliest_release_datetime(task, now.date())
+    start_at = release_at - dt.timedelta(seconds=int(task.get("lead_seconds", 60)))
+    return now >= start_at
+
+
+def build_main_command(task):
+    task = normalize_task(task)
+    return [
+        sys.executable,
+        "main.py",
+        "--config",
+        task["config"],
+        "--browser",
+        task["browser"],
+        "--once",
+    ]
+
+
+def write_scheduler_status(payload):
+    payload = dict(payload)
+    payload["updated_at"] = dt.datetime.now().isoformat(timespec="seconds")
+    with open(SCHEDULER_STATUS_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def run_task_until_success(task):
+    task = normalize_task(task)
+    attempts = int(task.get("max_attempts", 120))
+    interval = int(task.get("interval_seconds", 5))
+    timeout = int(task.get("timeout_seconds", 180))
+    command = build_main_command(task)
+
+    for attempt in range(1, attempts + 1):
+        started_at = dt.datetime.now().isoformat(timespec="seconds")
+        result = subprocess.run(
+            command,
+            cwd=ROOT_DIR,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        success = result.returncode == 0
+        write_scheduler_status({
+            "status": "success" if success else "retrying",
+            "task_id": task["id"],
+            "task_name": task["name"],
+            "attempt": attempt,
+            "started_at": started_at,
+            "returncode": result.returncode,
+            "stdout_tail": result.stdout[-2000:],
+            "stderr_tail": result.stderr[-2000:],
+        })
+        if success:
+            return True
+        if attempt < attempts:
+            time.sleep(interval)
+    return False
+
+
+def run_due_tasks_once(tasks):
+    due_tasks = [normalize_task(task) for task in tasks if task_due(task)]
+    if not due_tasks:
+        write_scheduler_status({"status": "waiting", "due_tasks": 0})
+        return 0
+    with ThreadPoolExecutor(max_workers=len(due_tasks)) as executor:
+        results = list(executor.map(run_task_until_success, due_tasks))
+    return 0 if all(results) else 1
+
+
+def scheduler_loop(tasks_path=TASKS_FILE, poll_seconds=10):
+    write_scheduler_status({"status": "started", "pid": os.getpid()})
+    while True:
+        try:
+            tasks = load_tasks(tasks_path)
+            run_due_tasks_once(tasks)
+        except Exception as exc:
+            write_scheduler_status({"status": "error", "error": str(exc)})
+        time.sleep(poll_seconds)
+
+
+def run_cli():
+    parser = argparse.ArgumentParser(description="Run PKU booking tasks when reservation opens")
+    parser.add_argument("--tasks", default=TASKS_FILE)
+    parser.add_argument("--loop", action="store_true")
+    parser.add_argument("--poll-seconds", type=int, default=10)
+    args = parser.parse_args()
+
+    if args.loop:
+        scheduler_loop(args.tasks, args.poll_seconds)
+        return 0
+    return run_due_tasks_once(load_tasks(args.tasks))
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_cli())

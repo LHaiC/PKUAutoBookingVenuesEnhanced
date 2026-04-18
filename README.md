@@ -1,158 +1,182 @@
 # PKU AutoBookingVenues Enhanced
-PKU智慧场馆自动预约工具
 
-> 本项目基于 [PKUautoBookingVenues-fixed-by-cq-tutu](https://github.com/qqworld-tutu/PKUautoBookingVenues-fixed-by-cq-tutu) 由 Claude Code + MiniMax M2.7 修改。
+PKU 智慧场馆自动预约工具。当前分支基于原项目继续维护，重点是把验证码识别迁移到本地 GLM-OCR、适配新版智慧场馆页面，并提供本地 WebUI 与抢场调度器。
 
-### 本次增强更新 (2026-04-16)
-1. **连续预约**：根据 `start_time` 和 `end_time` 自动推导连续预约时段数量，不再单独配置 `duration`。
-2. **本地 GLM-OCR 验证码识别**：优先使用本地 OCR 服务返回点击坐标；超级鹰仅在 `allow_chaojiying_fallback = true` 时作为显式兜底。
-3. **轻量 Web Dashboard**：基于 Flask 提供的可视化管理界面。
+## 相对原仓库的主要改动
 
-#### 本地 OCR 部署说明
-1. **安装依赖**：
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. **准备模型**：
-   将 transformers 格式的 GLM-OCR 模型放入 `models/GLM-OCR`。
-3. **启动 OCR 服务**：
-   ```bash
-   python ocr_server_transformers.py --model models/GLM-OCR --port 8000
-   ```
-4. **运行测试**：
-   ```bash
-   GLM_ENDPOINT=http://localhost:8000/glmocr/parse python tests/test_glm_ocr.py
-   ```
-   该脚本会读取 `tests/captcha_samples/` 中最新抓取样本；如果没有样本，则使用 `tests/test.png`。未获得目标字的可点击坐标时脚本会非 0 退出，并把调试图写到 `tests/test_output.png`。
+- `config0.ini` 示例已改为 `config.example.ini`；实际使用时复制为 `config.ini`。`config.ini` 默认被 `.gitignore` 忽略。
+- `duration` 已删除，预约长度只由 `[time] start_time` 和 `end_time` 决定。
+- 安全验证优先使用本地 GLM-OCR 服务返回点击坐标。超级鹰只在 `allow_chaojiying_fallback = true` 时兜底。
+- 付款流程只自动点击到“提交订单”。提交成功后程序等待人工自行完成网上付款，不再自动点击校园卡付款入口。
+- 羽毛球场馆支持别名和父场馆写法，例如 `五四体育中心-羽毛球馆`、`邱德拔体育馆-羽毛球场`。
+- 支持连续时段：例如 `start_time=20260422-0650`、`end_time=20260422-0950` 会尝试同一场地连续 3 小时。
+- 新增 `booking_scheduler.py`：按“目标日期前 3 天 12:00 开放预约”的规则，在开放前 1 分钟开始反复运行。
+- 新增 Flask WebUI：可编辑本地配置、创建多个预约任务、启动/停止调度器。
 
-5. **抓取真实验证码样本**：
-   ```bash
-   python tests/capture_captcha_sample.py
-   ```
-   脚本会从实际页面保存验证码图片和目标字元数据，供本地 OCR 集成测试复现。
+## 安装
 
-#### Web Dashboard 使用
-1. **启动服务**：
-   ```bash
-   cd web_dashboard && python app.py
-   ```
-2. 访问 `http://localhost:5000` 进行管理。
+建议使用已有的 `vllm` conda 环境：
 
----
+```bash
+cd /home/hcliu/projects/PKUAutoBookingVenues
+source ~/miniconda3/bin/activate vllm
+pip install -r requirements.txt
+```
 
-以下是原项目[PKUautoBookingVenues-fixed-by-cq-tutu](https://github.com/qqworld-tutu/PKUautoBookingVenues-fixed-by-cq-tutu)的[README](https://github.com/qqworld-tutu/PKUautoBookingVenues-fixed-by-cq-tutu/blob/master/README.md)内容
+Firefox 默认使用 Selenium Manager 或项目内 `driver/geckodriver.bin`。如果当前环境没有 Selenium：
 
----
-
-# PKU AutoBookingVenues -fixed by cq-tutu
-PKU智慧场馆自动预约工具部分代码和这个README的一部分引用自之前的智慧场馆自动预约项目 https://github.com/Charliecwei/PKU_Venues_Auto_Book
-
-本羽毛球鼠鼠想打羽毛球一直抢不到场啊！于是便萌生了自动预约场地的想法。在github上找到了之前大佬写的程序。然而，年久失修的代码如今已经完全无法运行。因此，本项目在之前项目的基础上进行了较大修改，主要体现在以下三个方面：
-
-1. selenium库更新了，之前的语法已经无法跑通
-2. 智慧场馆网站也新写了，许多爬虫代码也随之修改
-3. 提交预约时的验证方式改成了文字点击，于是使用了超级鹰的api来识别
-
-
-
-> [!CAUTION]
->
-> 本项目还在初期阶段，各方面都不甚完善，如有任何意见或建议，欢迎联系我。（wechat：dj7152，email：chenquan@stu.pku.edu.cn）
-
-
-
-
-## 说明
-
-- 本工具采用 Python3 搭配 `selenium` 完成自动化操作，实现全自动预约场馆
-- 本项目需要提前安装firefox浏览器以及驱动，请把firefox驱动复制到该文件夹下
-- 支持基于[Server酱](https://sct.ftqq.com/)的备案结果微信推送功能，体验更佳
-- 采用定时任务可实现定期（如每周）免打扰预约，请设置在三天前的11:55-12:00之间
-- 第三方依赖包几乎只有 `selenium` 一个
-- 由于我只测试过羽毛球场的预约，其他场馆只是理论上可行，如果出现任何问题，可以提issue
-- 目前仅支持一个小时的预约，后续可能会增加两个小时预约的功能
-- `config`参数填写`config.ini`文件的名称，类型为字符串
-- `lst_config`为config文件名称字符串构成的列表
-- `page(config)`单独处理每个`config.ini`文件,`muilti_run(lst_config)`并行处理`lst_config`列表中的所有`config.ini`，`sequence_run(lst_config)`按序处理
-- 定时任务还未经过完全测试
-- 注意付款需要手动执行！请在10分钟内自行完成付款！
-
-
-
-
-## 安装与需求
-
-### Python 3
-
-本项目需要 Python 3，可以从[Python 官网](https://www.python.org/)下载安装
-
-### Packages
-
-#### selenium
-
-采用如下命令安装 `selenium`，支持 selenium 4 及以上版本：
-
-```python
+```bash
 pip install selenium
 ```
 
-### API
+## 配置
 
-#### 超级鹰
+```bash
+cp config.example.ini config.ini
+```
 
-在https://www.chaojiying.com/注册，并充钱（最少充10块钱，可识别验证码625次）
+重点字段：
 
-然后，进入用户中心，在左侧菜单栏中点击“软件ID”，生成一个软件ID，并填入config文件中的soft_id
+- `[login] user_name/password`：IAAA 账号密码。
+- `[type] venue`：推荐写完整父子场馆名，例如 `五四体育中心-羽毛球馆` 或 `邱德拔体育馆-羽毛球场`。
+- `[type] venue_num`：指定场地编号填正整数；随机场地填 `-1`。
+- `[time] start_time/end_time`：支持 `YYYYMMDD-HHMM` 或 `星期-HHMM`，星期格式中 `1` 到 `7` 表示周一到周日。
+- `[glm_ocr] endpoint`：默认 `http://localhost:8000`，与 OCR 服务端口一致。
 
+多个候选时段用 `/` 分隔：
 
+```ini
+start_time = 20260422-0650/20260422-0750
+end_time = 20260422-0750/20260422-0850
+```
 
-## 基本用法
+连续几小时用一个起止范围表达：
 
-1. 复制 `config.example.ini` 为 `config.ini`，在 `config.ini` 中填写自己的账号、场馆和时间配置。
+```ini
+start_time = 20260422-0650
+end_time = 20260422-0950
+```
 
-2. 用文本编辑器（建议代码编辑器）打开 `config.ini` 文件
+## 本地 GLM-OCR
 
-3. 配置 `[login]`、`[type]`、`[time]`、`[wechat_notice]`、`[glm_ocr]`、`[chaojiying]` 这几个 Section 下的变量；示例文件内有详细注释。`duration` 已废弃，预约长度由 `start_time` 和 `end_time` 推导。
+OCR 服务默认端口是 `8000`。
 
+下载模型：
 
-## 定时运行
+```bash
+python scripts/download_glm_ocr.py --repo zai-org/GLM-OCR --output models/GLM-OCR
+```
 
-### Windows
+如果模型已经放在 `models/GLM-OCR`，直接启动：
 
-本项目中的 `autoRun.bat` 文件可提供在静默免打扰情况下运行程序的选择，配合 Windows 任务计划管理可实现定期自动填报，具体请参考[Win10下定时启动程序或脚本](https://blog.csdn.net/xielifu/article/details/81016220)
+```bash
+bash scripts/start_ocr_server.sh
+```
 
-### mac OS
+等价命令：
 
-进入项目根目录，以命令 `./macAutoRun.sh` 执行 `macAutoRun.sh` 脚本即可，可设定或取消定时运行
+```bash
+python ocr_server_transformers.py --model models/GLM-OCR --port 8000
+```
 
-### Linux
+健康检查：
 
-使用 `crontab` 设置
+```bash
+curl http://localhost:8000/health
+```
 
-**Note:** 静默运行的弊端为无法看到任何报错信息，若程序运行有错误，使用者很难得知。故建议采用定时静默运行时，设置微信推送，在移动端即可查看到备案成功信息。
+OCR 原理：
 
+- 主程序进入安全验证后，读取页面目标字和验证码图片。
+- 服务端让 GLM-OCR 识别图片中的候选汉字。
+- 本地视觉预处理会过滤页面水印和无关文字，结合颜色文字区域生成候选框。
+- `captcha_matcher.py` 将目标字与候选字匹配，返回每个目标字的点击坐标。
+- 如果识别失败，会保存调试图片和元数据到 `models/captcha_failures/`，便于人工复核。
 
+## 命令行运行
 
-## 微信推送
+运行一次：
 
-本项目支持基于[Server酱](https://sct.ftqq.com/)的微信推送功能，仅需登录并扫码绑定，之后将获取到的 SCKEY 填入 `config0.ini` 文件即可
+```bash
+python main.py --config config.ini --browser firefox --once
+```
 
+失败后重试，成功即停止：
 
+```bash
+python main.py --config config.ini --browser firefox --retries 20
+```
 
-## 责任须知
+## 调度器
 
-- 本项目仅供参考学习，造成的一切后果由使用者自行承担
+预约开放规则按“目标日期前 3 天 12:00”计算。例如 `2026-04-22` 最早在 `2026-04-19 12:00` 可预约，调度器会在 `11:59:00` 开始循环尝试。
 
+准备任务文件：
 
+```bash
+cp tasks.example.json tasks.json
+```
 
-## 证书
+运行所有已到时间的任务一次：
 
-[Apache License 2.0](https://github.com/yanyuandaxia/PKUAutoBookingVenues/blob/main/LICENSE)
+```bash
+python booking_scheduler.py --tasks tasks.json
+```
 
+常驻循环：
 
+```bash
+python booking_scheduler.py --tasks tasks.json --loop
+```
 
-## 版本历史
-### version 1.0
+同一时段同时抢五四和邱德拔：复制两份配置，例如 `configs/wusi.ini` 与 `configs/qdb.ini`，在 `tasks.json` 中各写一个任务。调度器会并发运行所有到点任务。
 
-- 发布于 2025.2.9
-- 项目初始版本
+## WebUI
+
+WebUI 默认端口是 `5000`。
+
+启动：
+
+```bash
+python web_dashboard/app.py
+```
+
+打开：
+
+```text
+http://127.0.0.1:5000
+```
+
+WebUI 能做的事：
+
+- 读取、编辑、保存本地 `config.ini` 或其他项目内配置文件。
+- 一键生成连续 N 小时的 `start_time/end_time`。
+- 创建多个未来预约任务，例如五四和邱德拔同一时段并发抢。
+- 启动/停止本地 `booking_scheduler.py`。
+- 查看最近运行状态和配置对应日志。
+
+如果希望打包成单文件启动器：
+
+```bash
+pip install pyinstaller
+bash scripts/build_webui.sh
+./dist/pku-booking-webui
+```
+
+## 测试
+
+```bash
+python -m unittest discover -s tests
+```
+
+如果 OCR 服务已启动，可以额外跑端到端 OCR 检查：
+
+```bash
+GLM_ENDPOINT=http://localhost:8000/glmocr/parse python tests/test_glm_ocr.py
+```
+
+## 注意
+
+- 订单提交后仍需人工在网页上完成付款。
+- 本项目只应在你有权限预约的账号和场馆上使用。
+- 自动化脚本可能因智慧场馆页面更新失效，失败样本优先看 `models/captcha_failures/` 和对应 `.log`。

@@ -1,6 +1,7 @@
 from configparser import ConfigParser
 from os import stat
 from time import sleep
+import argparse
 import datetime
 import json
 import os
@@ -126,16 +127,10 @@ def load_config(config):
         if conf.has_option('glm_ocr', 'allow_chaojiying_fallback')
         else False
     )
-    auto_campus_card_pay = (
-        conf.getboolean('payment', 'auto_campus_card_pay')
-        if conf.has_option('payment', 'auto_campus_card_pay')
-        else False
-    )
-
     return (
         user_name, password, venue, venue_num, start_time, end_time, wechat_notice,
         sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout,
-        allow_chaojiying_fallback, auto_campus_card_pay,
+        allow_chaojiying_fallback,
     )
 
 
@@ -155,7 +150,7 @@ def page(config, browser="chrome"):
     (
         user_name, password, venue, venue_num, start_time, end_time, wechat_notice,
         sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout,
-        allow_chaojiying_fallback, auto_campus_card_pay,
+        allow_chaojiying_fallback,
     ) = load_config(config)
 
     log_str = ""
@@ -220,7 +215,14 @@ def page(config, browser="chrome"):
             status = False
     if status:
         try:
-            log_str += click_pay(driver, auto_campus_card_pay=auto_campus_card_pay)
+            log_str += click_submit_order(driver)
+        except Exception as exc:
+            log_str += f"提交订单失败: {exc}\n"
+            print(f"提交订单失败: {exc}\n")
+            status = False
+    if status:
+        try:
+            log_str += click_pay(driver)
         except:
             log_str += "付款失败\n"
             print("付款失败\n")
@@ -273,14 +275,27 @@ def multi_run(lst_conf, browser="chrome"):
     pool.join()
 
 
-if __name__ == '__main__':
-    browser = "firefox"
+def run_cli():
+    parser = argparse.ArgumentParser(description="PKU venue booking runner")
+    parser.add_argument("--config", default="config.ini", help="config file path")
+    parser.add_argument("--browser", default="firefox", choices=["firefox", "chrome"])
+    parser.add_argument("--retries", type=int, default=3, help="stop after first success")
+    parser.add_argument("--once", action="store_true", help="run one attempt only")
+    args = parser.parse_args()
 
     # lst_conf = env_check()
     # print(lst_conf)
     # multi_run(lst_conf, browser)
     # sequence_run(lst_conf, browser)
-    for i in range(3):
-        status_main = page('config.ini', browser)
+    retries = 1 if args.once else args.retries
+    success = False
+    for _ in range(retries):
+        status_main = page(args.config, args.browser)
         if status_main:
+            success = True
             break
+    return 0 if success else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(run_cli())
