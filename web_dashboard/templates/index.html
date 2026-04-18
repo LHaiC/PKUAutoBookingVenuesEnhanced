@@ -71,9 +71,10 @@
             <button onclick="loadConfig()">读取配置</button>
             <button onclick="applySlotRange()" class="secondary">生成连续时段</button>
             <button onclick="saveConfig()">保存配置</button>
+            <button onclick="saveConfigAndAddTask()" class="secondary">保存配置并添加任务</button>
             <button onclick="runNow()">立即运行一次</button>
         </div>
-        <p class="small">连续时段会写成 start_time/end_time，例如 20260422-0650 到 20260422-0950。多个候选时段仍可用斜杠分隔。</p>
+        <p class="small">预约内容只写在配置文件里。连续时段会写成 start_time/end_time，例如 20260422-1300 到 20260422-1500。多个候选时段仍可用斜杠分隔。</p>
     </section>
 
     <section>
@@ -81,7 +82,6 @@
         <div class="grid">
             <div><label>任务名</label><input id="task-name" placeholder="wusi-0422-morning"></div>
             <div><label>任务配置</label><input id="task-config" value="config.ini"></div>
-            <div><label>开始时间</label><input id="task-start" placeholder="留空则读取配置"></div>
             <div><label>最大尝试次数</label><input id="task-attempts" type="number" value="120"></div>
             <div><label>间隔秒数</label><input id="task-interval" type="number" value="5"></div>
             <div><label>提前秒数</label><input id="task-lead" type="number" value="60"></div>
@@ -93,9 +93,10 @@
             <button onclick="stopScheduler()" class="danger">停止调度器</button>
         </div>
         <table>
-            <thead><tr><th>启用</th><th>任务</th><th>配置</th><th>开始时间</th><th>重试</th><th>操作</th></tr></thead>
+            <thead><tr><th>启用</th><th>任务</th><th>配置</th><th>场馆</th><th>预约时间</th><th>开跑时间</th><th>重试</th><th>操作</th></tr></thead>
             <tbody id="tasks-body"></tbody>
         </table>
+        <p class="small">任务只指向配置文件。场馆和预约时间从对应 config 解析，避免 tasks.json 和 config.ini 重复写时间。</p>
     </section>
 
     <section>
@@ -157,7 +158,21 @@ async function saveConfig() {
     const res = await fetch("/api/config", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
     const data = await res.json();
     renderFields(data.values);
+    document.getElementById("task-config").value = data.path;
     document.getElementById("status").textContent = `已保存 ${data.path}`;
+    return data;
+}
+
+async function saveConfigAndAddTask() {
+    const data = await saveConfig();
+    const venue = (data.values.type || {}).venue || "";
+    const start = (data.values.time || {}).start_time || "";
+    document.getElementById("task-config").value = data.path;
+    if (!document.getElementById("task-name").value) {
+        document.getElementById("task-name").value = `${venue} ${start}`.trim() || data.path;
+    }
+    addTask();
+    await saveTasks();
 }
 
 function addMinutes(hhmm, minutes) {
@@ -174,7 +189,6 @@ function applySlotRange() {
     if (!day || !start || hours < 1) return;
     document.getElementById(fieldId("time", "start_time")).value = `${day}-${start}`;
     document.getElementById(fieldId("time", "end_time")).value = `${day}-${addMinutes(start, hours * 60)}`;
-    document.getElementById("task-start").value = `${day}-${start}`;
 }
 
 async function runNow() {
@@ -190,11 +204,16 @@ function renderTasks() {
     body.innerHTML = "";
     tasks.forEach((task, index) => {
         const tr = document.createElement("tr");
+        const bookingTime = task.booking_start_time || task.booking_end_time
+            ? `${task.booking_start_time || "?"} -> ${task.booking_end_time || "?"}`
+            : (task.error || "未能解析配置");
         tr.innerHTML = `
             <td><input type="checkbox" ${task.enabled ? "checked" : ""} onchange="tasks[${index}].enabled=this.checked"></td>
             <td><input value="${task.name || ""}" onchange="tasks[${index}].name=this.value"></td>
             <td><input value="${task.config || "config.ini"}" onchange="tasks[${index}].config=this.value"></td>
-            <td><input value="${task.start_time || ""}" onchange="tasks[${index}].start_time=this.value"></td>
+            <td>${task.venue || "-"}</td>
+            <td>${bookingTime}</td>
+            <td>${task.run_after || "-"}</td>
             <td>${task.max_attempts || 120} 次 / ${task.interval_seconds || 5} 秒</td>
             <td><button class="danger" onclick="tasks.splice(${index},1);renderTasks()">删除</button></td>`;
         body.appendChild(tr);
@@ -207,7 +226,6 @@ function addTask() {
         name: document.getElementById("task-name").value || document.getElementById("task-config").value,
         config: document.getElementById("task-config").value || "config.ini",
         browser: document.getElementById("browser").value,
-        start_time: document.getElementById("task-start").value,
         max_attempts: Number(document.getElementById("task-attempts").value || 120),
         interval_seconds: Number(document.getElementById("task-interval").value || 5),
         lead_seconds: Number(document.getElementById("task-lead").value || 60),

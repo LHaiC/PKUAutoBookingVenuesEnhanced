@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT_DIR))
 from booking_scheduler import (  # noqa: E402
     SCHEDULER_STATUS_FILE,
     TASKS_FILE,
+    describe_task,
     load_tasks,
     normalize_task,
     save_tasks,
@@ -134,11 +135,11 @@ def config_api():
 @app.route("/api/tasks", methods=["GET", "POST"])
 def tasks_api():
     if request.method == "GET":
-        return jsonify({"tasks": [normalize_task(task) for task in load_tasks(TASKS_FILE)]})
+        return jsonify({"tasks": [describe_task(task) for task in load_tasks(TASKS_FILE)]})
     payload = request.get_json(force=True)
     tasks = [normalize_task(task) for task in payload.get("tasks", [])]
     save_tasks(tasks, TASKS_FILE)
-    return jsonify({"tasks": tasks})
+    return jsonify({"tasks": [describe_task(task) for task in tasks]})
 
 
 @app.route("/api/status")

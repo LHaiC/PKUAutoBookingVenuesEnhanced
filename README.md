@@ -48,6 +48,7 @@ PKUAutoBookingVenues/
 
 ```text
 config.ini                          # 运行生成：你的真实配置，已被 .gitignore 忽略
+configs/                            # 运行生成：多任务真实配置目录，已忽略
 tasks.json                          # 运行生成：WebUI/调度器保存的真实任务，已忽略
 status.json                         # 运行生成：main.py 最近一次运行状态，已忽略
 scheduler_status.json               # 运行生成：调度器最近状态，已忽略
@@ -55,6 +56,14 @@ scheduler_status.json               # 运行生成：调度器最近状态，已
 models/                             # 运行生成：OCR 模型和验证码失败样本，已忽略
 .scheduler.pid                      # 运行生成：WebUI 启动调度器时记录的进程号，已忽略
 ```
+
+## 配置边界
+
+本项目现在只有一个预约事实来源：`config.ini` 或 `configs/*.ini`。
+
+- `config.ini` / `configs/*.ini`：写账号、场馆、场地号、`start_time`、`end_time`、OCR 配置。也就是说“预约什么”只写在这里。
+- `tasks.json`：只写任务名、指向哪个 config、浏览器、重试参数、是否启用。也就是说“何时调度哪个配置运行”只写在这里。
+- 调度器计算开放时间时，会读取 task 指向的 config 中的 `[time] start_time`；不要在 `tasks.json` 里重复写 `start_time`。
 
 ## 相对原仓库的主要改动
 
@@ -185,6 +194,63 @@ python booking_scheduler.py --tasks tasks.json --loop
 
 同一时段同时抢五四和邱德拔：复制两份配置，例如 `configs/wusi.ini` 与 `configs/qdb.ini`，在 `tasks.json` 中各写一个任务。调度器会并发运行所有到点任务。
 
+例如同时抢周六 13:00-15:00 的五四和邱德拔：
+
+`configs/wusi_sat_1300.ini`：
+
+```ini
+[type]
+venue = 五四体育中心-羽毛球馆
+venue_num = -1
+
+[time]
+start_time = 6-1300
+end_time = 6-1500
+```
+
+`configs/qdb_sat_1300.ini`：
+
+```ini
+[type]
+venue = 邱德拔体育馆-羽毛球场
+venue_num = -1
+
+[time]
+start_time = 6-1300
+end_time = 6-1500
+```
+
+`tasks.json`：
+
+```json
+{
+  "tasks": [
+    {
+      "id": "wusi-sat-1300",
+      "name": "五四 周六 13:00-15:00",
+      "config": "configs/wusi_sat_1300.ini",
+      "browser": "firefox",
+      "enabled": true,
+      "lead_seconds": 60,
+      "interval_seconds": 5,
+      "max_attempts": 120,
+      "timeout_seconds": 180
+    },
+    {
+      "id": "qdb-sat-1300",
+      "name": "邱德拔 周六 13:00-15:00",
+      "config": "configs/qdb_sat_1300.ini",
+      "browser": "firefox",
+      "enabled": true,
+      "lead_seconds": 60,
+      "interval_seconds": 5,
+      "max_attempts": 120,
+      "timeout_seconds": 180
+    }
+  ]
+}
+```
+
 ## WebUI
 
 WebUI 默认端口是 `5000`。
@@ -205,7 +271,7 @@ WebUI 能做的事：
 
 - 读取、编辑、保存本地 `config.ini` 或其他项目内配置文件。
 - 一键生成连续 N 小时的 `start_time/end_time`。
-- 创建多个未来预约任务，例如五四和邱德拔同一时段并发抢。
+- 创建多个未来预约任务。任务只指向 config，场馆和预约时间会从 config 自动解析显示。
 - 启动/停止本地 `booking_scheduler.py`。
 - 查看最近运行状态和配置对应日志。
 

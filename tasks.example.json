@@ -5,7 +5,6 @@
       "name": "五四羽毛球馆 04/22 06:50",
       "config": "config.ini",
       "browser": "firefox",
-      "start_time": "20260422-0650",
       "enabled": true,
       "lead_seconds": 60,
       "interval_seconds": 5,

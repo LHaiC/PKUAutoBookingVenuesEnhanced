@@ -8,6 +8,7 @@ models/
 tests/test_output.png
 .codex
 config.ini
+configs/
 tasks.json
 status.json
 scheduler_status.json

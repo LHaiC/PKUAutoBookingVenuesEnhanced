@@ -34,7 +34,21 @@ def save_tasks(tasks, path=TASKS_FILE):
 
 
 def normalize_task(task):
-    normalized = dict(task)
+    normalized = {
+        key: task[key]
+        for key in (
+            "id",
+            "name",
+            "config",
+            "browser",
+            "enabled",
+            "lead_seconds",
+            "interval_seconds",
+            "max_attempts",
+            "timeout_seconds",
+        )
+        if key in task
+    }
     normalized.setdefault("id", uuid.uuid4().hex[:12])
     normalized.setdefault("name", normalized.get("config", "config.ini"))
     normalized.setdefault("config", "config.ini")
@@ -45,6 +59,26 @@ def normalize_task(task):
     normalized.setdefault("max_attempts", 120)
     normalized.setdefault("timeout_seconds", 180)
     return normalized
+
+
+def task_config_path(task):
+    config_path = normalize_task(task)["config"]
+    if os.path.isabs(config_path):
+        return config_path
+    return os.path.join(ROOT_DIR, config_path)
+
+
+def read_booking_config(config_path):
+    conf = configparser.ConfigParser()
+    conf.read(config_path, encoding="utf8")
+    if not conf.has_section("time"):
+        raise ValueError(f"missing [time] section in {config_path}")
+    return {
+        "venue": conf.get("type", "venue", fallback=""),
+        "venue_num": conf.get("type", "venue_num", fallback="-1"),
+        "start_time": conf.get("time", "start_time", fallback="").strip(),
+        "end_time": conf.get("time", "end_time", fallback="").strip(),
+    }
 
 
 def target_date_from_token(token, today=None):
@@ -66,19 +100,15 @@ def release_datetime_for_token(token, today=None):
 
 
 def start_tokens_for_task(task):
-    start_time = task.get("start_time")
-    if not start_time:
-        config_path = os.path.join(ROOT_DIR, task.get("config", "config.ini"))
-        conf = configparser.ConfigParser()
-        conf.read(config_path, encoding="utf8")
-        start_time = conf["time"]["start_time"]
+    booking_config = read_booking_config(task_config_path(task))
+    start_time = booking_config["start_time"]
     return [token.strip() for token in start_time.split("/") if token.strip()]
 
 
 def earliest_release_datetime(task, today=None):
     releases = [release_datetime_for_token(token, today) for token in start_tokens_for_task(task)]
     if not releases:
-        raise ValueError("task has no start_time")
+        raise ValueError("task config has no start_time")
     return min(releases)
 
 
@@ -103,6 +133,30 @@ def build_main_command(task):
         task["browser"],
         "--once",
     ]
+
+
+def describe_task(task, today=None):
+    described = normalize_task(task)
+    try:
+        booking_config = read_booking_config(task_config_path(described))
+        described["venue"] = booking_config["venue"]
+        described["venue_num"] = booking_config["venue_num"]
+        described["booking_start_time"] = booking_config["start_time"]
+        described["booking_end_time"] = booking_config["end_time"]
+        release_at = earliest_release_datetime(described, today)
+        run_after = release_at - dt.timedelta(seconds=int(described.get("lead_seconds", 60)))
+        described["release_at"] = str(release_at)
+        described["run_after"] = str(run_after)
+        described["error"] = None
+    except Exception as exc:
+        described["venue"] = ""
+        described["venue_num"] = ""
+        described["booking_start_time"] = ""
+        described["booking_end_time"] = ""
+        described["release_at"] = ""
+        described["run_after"] = ""
+        described["error"] = str(exc)
+    return described
 
 
 def write_scheduler_status(payload):
