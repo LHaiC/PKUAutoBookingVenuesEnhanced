@@ -160,6 +160,59 @@ def detect_colored_text_bboxes(
     return [box for box in merged if validate_bbox(box, image.size)]
 
 
+def isolate_colored_text(image: Image.Image) -> Image.Image:
+    rgb = image.convert("RGB")
+    clean = Image.new("RGB", rgb.size, "white")
+    source = rgb.load()
+    target = clean.load()
+    width, height = rgb.size
+
+    for y in range(height):
+        for x in range(width):
+            pixel = source[x, y]
+            if _colored_text_pixel(*pixel):
+                target[x, y] = pixel
+
+    return clean
+
+
+def build_colored_text_strip(
+    image: Image.Image,
+    padding: int = 5,
+    gap: int = 20,
+    margin: int = 20,
+) -> Image.Image | None:
+    boxes = detect_colored_text_bboxes(image)
+    if not boxes:
+        return None
+
+    clean = isolate_colored_text(image)
+    width, height = clean.size
+    crops = []
+    max_height = 0
+
+    for x1, y1, x2, y2 in boxes:
+        left = max(0, x1 - padding)
+        top = max(0, y1 - padding)
+        right = min(width, x2 + padding)
+        bottom = min(height, y2 + padding)
+        crop = clean.crop((left, top, right, bottom))
+        crops.append(crop)
+        max_height = max(max_height, crop.height)
+
+    strip_width = sum(crop.width for crop in crops) + gap * (len(crops) - 1) + margin * 2
+    strip_height = max_height + margin * 2
+    strip = Image.new("RGB", (strip_width, strip_height), "white")
+
+    x = margin
+    for crop in crops:
+        y = margin + (max_height - crop.height) // 2
+        strip.paste(crop, (x, y))
+        x += crop.width + gap
+
+    return strip
+
+
 def refine_bbox_to_dark_pixels(
     image: Image.Image,
     bbox: list[int],

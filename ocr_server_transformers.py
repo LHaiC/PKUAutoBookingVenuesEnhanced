@@ -1,6 +1,7 @@
 import argparse
 import base64
 import binascii
+import io
 import json
 import math
 import os
@@ -16,7 +17,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from captcha_matcher import MatchError, match_targets, normalize_candidates
-from captcha_vision import decode_image, detect_colored_text_bboxes, image_size, refine_bbox_to_dark_pixels
+from captcha_vision import (
+    build_colored_text_strip,
+    decode_image,
+    detect_colored_text_bboxes,
+    image_size,
+    refine_bbox_to_dark_pixels,
+)
 
 
 app = FastAPI()
@@ -130,6 +137,16 @@ def attach_colored_text_bboxes(image: Image.Image, candidates: list[dict]) -> li
     return updated
 
 
+def prepare_recognition_image_bytes(image: Image.Image, use_strip: bool) -> bytes:
+    recognition_image = build_colored_text_strip(image) if use_strip else None
+    if recognition_image is None:
+        recognition_image = image
+
+    buf = io.BytesIO()
+    recognition_image.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 @contextmanager
 def temporary_image_file(image_bytes: bytes):
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
@@ -203,7 +220,8 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     size = image_size(image)
-    raw_output = engine.recognize(image_bytes, targets)
+    recognition_bytes = prepare_recognition_image_bytes(image, use_strip=bool(targets))
+    raw_output = engine.recognize(recognition_bytes, None)
     raw_candidates = attach_colored_text_bboxes(image, parse_model_output(raw_output))
 
     if targets:

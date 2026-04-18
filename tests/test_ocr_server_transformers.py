@@ -65,6 +65,20 @@ class FakeTextRecognitionEngine:
         return "提 结 叶\n件"
 
 
+class FakeRecordingEngine:
+    model_path = "fake"
+    loaded = True
+
+    def __init__(self):
+        self.received_targets = "unset"
+        self.received_size = None
+
+    def recognize(self, image_bytes, targets):
+        self.received_targets = targets
+        self.received_size = Image.open(io.BytesIO(image_bytes)).size
+        return "工产建穿"
+
+
 class OcrServerTransformerTests(unittest.TestCase):
     def setUp(self):
         self.original_engine = ocr_server_transformers.engine
@@ -256,6 +270,33 @@ class OcrServerTransformerTests(unittest.TestCase):
                 {"text": "结", "bbox": [50, 12, 68, 39], "x": 59, "y": 25, "confidence": 0.5},
             ],
         )
+
+    def test_parse_route_uses_target_agnostic_strip_for_targeted_ocr(self):
+        recording_engine = FakeRecordingEngine()
+        ocr_server_transformers.engine = recording_engine
+        image = Image.new("RGB", (310, 155), (245, 248, 250))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([23, 31, 58, 64], fill=(0, 90, 120))
+        draw.rectangle([81, 74, 120, 99], fill=(240, 90, 20))
+        draw.rectangle([164, 16, 205, 54], fill=(90, 40, 180))
+        draw.rectangle([207, 77, 240, 116], fill=(90, 40, 180))
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        response = parse(
+            ParseRequest(
+                images=[f"data:image/png;base64,{payload}"],
+                targets=["穿", "产", "工"],
+            )
+        )
+
+        self.assertIsNone(recording_engine.received_targets)
+        self.assertNotEqual(recording_engine.received_size, (310, 155))
+        self.assertEqual([item["text"] for item in response["results"]], ["穿", "产", "工"])
+        self.assertEqual(response["results"][0]["x"], 224)
+        self.assertEqual(response["results"][1]["x"], 101)
+        self.assertEqual(response["results"][2]["x"], 41)
 
     def test_parse_route_fails_closed_for_plain_text_with_targets(self):
         ocr_server_transformers.engine = FakeEngine()

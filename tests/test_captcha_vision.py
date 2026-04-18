@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw
 
 from captcha_vision import (
     bbox_center,
+    build_colored_text_strip,
     decode_image,
     detect_colored_text_bboxes,
     detect_dark_regions,
@@ -80,6 +81,40 @@ class CaptchaVisionTests(unittest.TestCase):
             detect_colored_text_bboxes(img),
             [[10, 10, 26, 36], [50, 12, 68, 39], [95, 9, 115, 37]],
         )
+
+    def test_build_colored_text_strip_normalizes_regions_left_to_right(self):
+        img = Image.new("RGB", (160, 80), (220, 240, 250))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([10, 40, 20, 60], fill=(200, 20, 20))
+        draw.rectangle([60, 5, 75, 25], fill=(20, 120, 220))
+        draw.rectangle([100, 30, 120, 55], fill=(230, 40, 180))
+
+        strip = build_colored_text_strip(img, padding=2, gap=4, margin=3)
+
+        self.assertIsNotNone(strip)
+        self.assertEqual(strip.size, (74, 36))
+        pixels = strip.load()
+        non_white_columns = [
+            x
+            for x in range(strip.width)
+            if any(pixels[x, y] != (255, 255, 255) for y in range(strip.height))
+        ]
+        column_groups = []
+        start = previous = non_white_columns[0]
+        for x in non_white_columns[1:]:
+            if x == previous + 1:
+                previous = x
+                continue
+            column_groups.append((start, previous + 1))
+            start = previous = x
+        column_groups.append((start, previous + 1))
+
+        self.assertEqual(column_groups, [(5, 16), (24, 40), (48, 69)])
+
+    def test_build_colored_text_strip_returns_none_without_regions(self):
+        img = Image.new("RGB", (160, 80), (220, 240, 250))
+
+        self.assertIsNone(build_colored_text_strip(img))
 
 
 if __name__ == "__main__":
