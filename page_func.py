@@ -12,6 +12,7 @@ import datetime
 import warnings
 from chaojiying import *
 import base64
+import re
 
 warnings.filterwarnings('ignore')
 
@@ -64,23 +65,14 @@ def booking_venue_kind(venue):
     return place
 
 
-def booking_first_slot_hour(venue):
-    venue = booking_venue_kind(venue)
-    if venue == "羽毛球馆":
-        return 6
-    if venue == "羽毛球场":
-        return 8
-    return 0
-
-
-def booking_slot_page_and_column(venue, start_time):
-    first_hour = booking_first_slot_hour(venue)
-    start = str(start_time).split()[1]
-    start_hour = int(start[:2])
-    slot_offset = start_hour - first_hour
-    if slot_offset < 0:
-        raise ValueError(f"预约开始时间早于场馆开放时间: {start}")
-    return slot_offset // 5, slot_offset % 5 + 1
+def time_column_from_rows(rows, start_time):
+    expected_start = str(start_time).split()[1][:5]
+    for row in rows:
+        for idx, text in enumerate(row):
+            match = re.search(r"(\d{2}:\d{2})\s*-\s*\d{2}:\d{2}", text)
+            if match and match.group(1) == expected_start:
+                return idx
+    return None
 
 
 def click_venue_card(driver, venue):
@@ -291,8 +283,26 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
         driver.find_element(By.XPATH,
                             '//*[@id="scrollTable"]/table/tbody/tr[last()]/td[last()]/div/i').click()
 
-    def page_num(venue, start_time):
-        return booking_slot_page_and_column(venue, start_time)
+    def visible_table_rows():
+        table = driver.find_element(By.ID, 'scrollTable')
+        rows = []
+        for row in table.find_elements(By.TAG_NAME, 'tr'):
+            cells = row.find_elements(By.TAG_NAME, 'td')
+            if cells:
+                rows.append([cell.text.strip() for cell in cells])
+        return rows
+
+    def time_num(start_time):
+        for _ in range(8):
+            column = time_column_from_rows(visible_table_rows(), start_time)
+            if column is not None:
+                return column
+            try:
+                next_page()
+                time.sleep(0.5)
+            except Exception:
+                break
+        raise ValueError(f"页面上找不到预约时间段: {str(start_time).split()[1][:5]}")
 
     def click_free(venue_num_click, time_num):
         WebDriverWait(driver, 5).until_not(
@@ -365,18 +375,16 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
         slot_count = max(1, interval_minutes // 60)
         print("开始时间:%s" % str(start_time).split()[1])
         print("结束时间:%s" % str(end_time).split()[1])
-        page, time_num = page_num(venue, start_time)
-        print(page, time_num)
-        for _ in range(page):
-            next_page()
-        status, venue_num = click_free(venue_num, time_num)
+        time_num_current = time_num(start_time)
+        print("时间列:%d" % time_num_current)
+        status, venue_num = click_free(venue_num, time_num_current)
 
         if status:
             log_str += "找到空闲场地，场地编号为%d\n" % venue_num
             print("找到空闲场地，场地编号为%d\n" % venue_num)
             if slot_count >= 2:
                 # 尝试订第二个连续slot（同一场地，下一个小时）
-                next_time_num = time_num + 1
+                next_time_num = time_num_current + 1
                 status2, venue_num2 = click_free(venue_num, next_time_num)
                 if status2:
                     # 注意：不同时间槽可能分配到不同场地号，需验证一致性
