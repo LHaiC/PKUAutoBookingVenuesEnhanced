@@ -81,6 +81,10 @@ def _colored_text_pixel(r: int, g: int, b: int) -> bool:
     hue *= 360
     if saturation < 0.28 or value > 0.97:
         return False
+    # Some captchas use a saturated blue sky background. It has high value and
+    # connects the whole image into one component unless we exclude it.
+    if 180 <= hue <= 220 and 0.45 <= saturation < 0.75 and value > 0.85:
+        return False
     # The captcha background commonly contains green plants. Excluding green
     # prevents those large background components from being treated as text.
     return not (45 <= hue <= 170)
@@ -162,13 +166,22 @@ def detect_colored_text_bboxes(
 
 def filter_captcha_text_bboxes(
     boxes: list[list[int]],
+    image_size: tuple[int, int] | None = None,
     min_width: int = 24,
     min_height: int = 24,
 ) -> list[list[int]]:
+    max_bottom = None
+    if image_size is not None:
+        max_bottom = int(image_size[1] * 0.85)
     return [
         box
         for box in boxes
-        if len(box) == 4 and box[2] - box[0] >= min_width and box[3] - box[1] >= min_height
+        if (
+            len(box) == 4
+            and box[2] - box[0] >= min_width
+            and box[3] - box[1] >= min_height
+            and (max_bottom is None or box[3] <= max_bottom)
+        )
     ]
 
 

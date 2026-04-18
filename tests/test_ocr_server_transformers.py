@@ -168,6 +168,11 @@ class OcrServerTransformerTests(unittest.TestCase):
 
         self.assertEqual([item["text"] for item in parsed], ["件", "叶", "结"])
 
+    def test_parse_model_output_normalizes_katakana_i_as_eight(self):
+        parsed = parse_model_output("装通イ被")
+
+        self.assertEqual([item["text"] for item in parsed], ["装", "通", "八", "被"])
+
     def test_parse_route_returns_503_when_model_unloaded(self):
         with self.assertRaises(HTTPException) as ctx:
             parse(ParseRequest(images=[make_png_data_uri()]))
@@ -331,6 +336,38 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(response["results"][0]["x"], 116)
         self.assertEqual(response["results"][1]["x"], 155)
         self.assertEqual(response["results"][2]["x"], 231)
+
+    def test_parse_route_ignores_short_shifted_view_and_uses_full_strip_view(self):
+        recording_engine = FakeRecordingEngine(
+            [
+                "装通被\n\n场馆预约",
+                "装通イ被",
+            ]
+        )
+        ocr_server_transformers.engine = recording_engine
+        image = Image.new("RGB", (310, 155), (77, 193, 228))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([41, 34, 78, 69], fill=(85, 30, 165))
+        draw.rectangle([93, 16, 126, 49], fill=(85, 30, 165))
+        draw.rectangle([146, 74, 172, 92], fill=(160, 50, 160))
+        draw.rectangle([169, 75, 180, 107], fill=(160, 50, 160))
+        draw.rectangle([207, 6, 242, 39], fill=(210, 20, 25))
+        draw.rectangle([77, 125, 109, 154], fill=(215, 90, 20))
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        response = parse(
+            ParseRequest(
+                images=[f"data:image/png;base64,{payload}"],
+                targets=["被", "通", "八"],
+            )
+        )
+
+        self.assertEqual([item["text"] for item in response["results"]], ["被", "通", "八"])
+        self.assertEqual(response["results"][0]["x"], 225)
+        self.assertEqual(response["results"][1]["x"], 110)
+        self.assertEqual(response["results"][2]["x"], 163)
 
     def test_parse_route_fails_closed_for_plain_text_with_targets(self):
         ocr_server_transformers.engine = FakeEngine()

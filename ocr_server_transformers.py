@@ -29,6 +29,9 @@ from captcha_vision import (
 
 app = FastAPI()
 engine = None
+OCR_CHAR_NORMALIZATION = {
+    "イ": "八",
+}
 
 
 @app.exception_handler(RequestValidationError)
@@ -96,6 +99,12 @@ def _find_candidate_json_array(output: str):
     return None
 
 
+def normalize_ocr_text(text: str) -> str:
+    for source, target in OCR_CHAR_NORMALIZATION.items():
+        text = text.replace(source, target)
+    return text
+
+
 def parse_model_output(output: str) -> list[dict]:
     parsed = _find_candidate_json_array(output)
     if parsed is not None:
@@ -103,7 +112,7 @@ def parse_model_output(output: str) -> list[dict]:
 
     result_line = re.search(r"识别结果\s*[:：]\s*([^\r\n]+)", output)
     if result_line:
-        text_segment = result_line.group(1)
+        text_segment = normalize_ocr_text(result_line.group(1))
         chars = re.findall(r"[\u4e00-\u9fff]", text_segment)
     else:
         chars = []
@@ -112,6 +121,7 @@ def parse_model_output(output: str) -> list[dict]:
             if not text_segment:
                 continue
             text_segment = text_segment.replace("场馆预约", "")
+            text_segment = normalize_ocr_text(text_segment)
             if any(keyword in text_segment for keyword in ("请", "验证", "点击", "场馆", "预约", "完成", "安全")):
                 continue
             if re.search(r"[:：]", text_segment):
@@ -165,9 +175,12 @@ def candidates_from_output(
     output: str,
     boxes: list[list[int]],
 ) -> list:
+    parsed = parse_model_output(output)
+    if boxes and len(parsed) < len(boxes):
+        return []
     candidates = attach_colored_text_bboxes(
         image,
-        parse_model_output(output),
+        parsed,
         boxes=boxes,
         trim_to_boxes=True,
     )
@@ -286,7 +299,7 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
 
     size = image_size(image)
     detected_boxes = detect_colored_text_bboxes(image)
-    boxes = filter_captcha_text_bboxes(detected_boxes) or detected_boxes
+    boxes = filter_captcha_text_bboxes(detected_boxes, size) or detected_boxes
 
     if targets:
         original_output = engine.recognize(image_bytes, None)
