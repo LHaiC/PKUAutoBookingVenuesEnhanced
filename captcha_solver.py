@@ -8,8 +8,11 @@ import base64
 import datetime
 import json
 import os
+import re
 import time
 import requests
+
+CAPTCHA_DEBUG_DIR = "models/captcha_failures"
 
 
 def _strict_int(value):
@@ -52,19 +55,119 @@ class CaptchaSolver:
         self.cy_password = cy_password
         self.cy_soft_id = cy_soft_id
 
-    def _get_captcha_info(self, driver):
+    def _parse_order_words(self, order_str):
+        segment = order_str or ""
+        if "：" in segment:
+            segment = segment.rsplit("：", 1)[-1]
+        elif ":" in segment:
+            segment = segment.rsplit(":", 1)[-1]
+        elif "点击" in segment:
+            segment = segment.split("点击", 1)[-1]
+
+        words = re.findall(r"[\u4e00-\u9fff]", segment)
+        return words
+
+    def _is_displayed(self, element):
+        try:
+            return element.is_displayed()
+        except Exception:
+            return True
+
+    def _visible_elements(self, driver, by, value):
+        try:
+            return [
+                element
+                for element in driver.find_elements(by, value)
+                if self._is_displayed(element)
+            ]
+        except Exception:
+            return []
+
+    def _captcha_image_candidates(self, driver, by):
+        candidates = []
+        locators = [
+            (by.XPATH, "//img[starts-with(@src, 'data:image')]"),
+            (
+                by.XPATH,
+                "/html/body/div[1]/div/div/div[3]/div[2]/div/div[1]/div[2]/div[4]/div[3]/div/div[2]/div/div[1]/div/img",
+            ),
+        ]
+        for locator_by, locator in locators:
+            for element in self._visible_elements(driver, locator_by, locator):
+                image_uri = element.get_attribute("src") or ""
+                if image_uri.startswith("data:image") and "," in image_uri:
+                    candidates.append(element)
+        candidates.sort(
+            key=lambda element: (
+                (getattr(element, "size", None) or {}).get("width", 0)
+                * (getattr(element, "size", None) or {}).get("height", 0)
+            ),
+            reverse=True,
+        )
+        return candidates
+
+    def _captcha_order_candidates(self, driver, by):
+        candidates = []
+        locators = [
+            (by.XPATH, "//*[contains(text(), '点击') or contains(text(), '依次')]"),
+            (
+                by.XPATH,
+                "/html/body/div[1]/div/div/div[3]/div[2]/div/div[1]/div[2]/div[4]/div[3]/div/div[2]/div/div[2]/span",
+            ),
+        ]
+        for locator_by, locator in locators:
+            for element in self._visible_elements(driver, locator_by, locator):
+                words = self._parse_order_words(getattr(element, "text", ""))
+                if len(words) >= 3:
+                    candidates.append((element, words))
+        return candidates
+
+    def _save_page_debug_snapshot(self, driver, reason, output_dir=None):
+        if output_dir is None:
+            output_dir = CAPTCHA_DEBUG_DIR
+        os.makedirs(output_dir, exist_ok=True)
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        html_path = os.path.join(output_dir, f"page-{reason}-{stamp}.html")
+        screenshot_path = os.path.join(output_dir, f"page-{reason}-{stamp}.png")
+
+        try:
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(getattr(driver, "page_source", ""))
+            print(f"已保存页面调试快照: {html_path}")
+        except Exception as exc:
+            print(f"保存页面HTML失败: {exc}")
+            html_path = None
+
+        try:
+            driver.save_screenshot(screenshot_path)
+            print(f"已保存页面截图: {screenshot_path}")
+        except Exception as exc:
+            print(f"保存页面截图失败: {exc}")
+            screenshot_path = None
+
+        return html_path, screenshot_path
+
+    def _get_captcha_info(self, driver, timeout=8, poll_interval=0.2):
         """Extract captcha image base64 and target words from page."""
         from selenium.webdriver.common.by import By
 
-        target_element = driver.find_element(By.XPATH,
-            "/html/body/div[1]/div/div/div[3]/div[2]/div/div[1]/div[2]/div[4]/div[3]/div/div[2]/div/div[1]/div/img")
-        order_element = driver.find_element(By.XPATH,
-            "/html/body/div[1]/div/div/div[3]/div[2]/div/div[1]/div[2]/div[4]/div[3]/div/div[2]/div/div[2]/span")
+        deadline = time.time() + timeout
+        target_element = None
+        order_words = []
+
+        while True:
+            image_candidates = self._captcha_image_candidates(driver, By)
+            order_candidates = self._captcha_order_candidates(driver, By)
+            if image_candidates and order_candidates:
+                target_element = image_candidates[0]
+                order_words = order_candidates[0][1]
+                break
+            if time.time() >= deadline:
+                self._save_page_debug_snapshot(driver, "captcha-not-found")
+                raise ValueError("captcha image or target text not found")
+            time.sleep(poll_interval)
 
         image_uri = target_element.get_attribute("src")
-        order_str = order_element.text
-        # order_words are the 3 characters to click, extracted from text like "请依次点击：北,京,大,学"
-        order_words = order_str[-6:-1].split(",")
 
         # Extract base64 data from data URI
         data_start = image_uri.find(",") + 1

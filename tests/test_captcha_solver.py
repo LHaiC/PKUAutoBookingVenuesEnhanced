@@ -2,6 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 import tempfile
+import base64
 
 from captcha_solver import CaptchaSolveError, CaptchaSolver
 from ocr_server_transformers import GlmOcrEngine
@@ -72,6 +73,43 @@ class FakeModel:
 class FakeElement:
     size = {"width": 224, "height": 179}
     rect = {"width": 224, "height": 179}
+
+
+class FakeCaptchaElement:
+    def __init__(self, text="", src="", displayed=True, width=120, height=60):
+        self.text = text
+        self.src = src
+        self.displayed = displayed
+        self.size = {"width": width, "height": height}
+        self.rect = {"width": width, "height": height}
+
+    def get_attribute(self, name):
+        if name == "src":
+            return self.src
+        return None
+
+    def is_displayed(self):
+        return self.displayed
+
+
+class FakeCaptchaDriver:
+    page_source = "<html><body>captcha</body></html>"
+
+    def __init__(self, images, texts):
+        self.images = images
+        self.texts = texts
+        self.screenshot_path = None
+
+    def find_elements(self, by, value):
+        if value == "//img[starts-with(@src, 'data:image')]":
+            return self.images
+        if value == "//*[contains(text(), '点击') or contains(text(), '依次')]":
+            return self.texts
+        return []
+
+    def save_screenshot(self, path):
+        self.screenshot_path = path
+        return True
 
 
 class FakeActions:
@@ -161,6 +199,32 @@ class CaptchaSolverTests(unittest.TestCase):
                 metadata = f.read()
             self.assertIn("glm_failed", metadata)
             self.assertIn("件", metadata)
+
+    def test_get_captcha_info_uses_data_uri_image_and_prompt_text(self):
+        solver = self.make_solver()
+        image_bytes = b"captcha-image"
+        payload = base64.b64encode(image_bytes).decode("utf-8")
+        image = FakeCaptchaElement(src=f"data:image/png;base64,{payload}")
+        prompt = FakeCaptchaElement(text="请依次点击：开,此,系")
+        driver = FakeCaptchaDriver([image], [prompt])
+
+        target_element, order_words, image_content = solver._get_captcha_info(driver)
+
+        self.assertIs(target_element, image)
+        self.assertEqual(order_words, ["开", "此", "系"])
+        self.assertEqual(image_content, image_bytes)
+
+    def test_get_captcha_info_saves_page_debug_when_elements_missing(self):
+        solver = self.make_solver()
+        driver = FakeCaptchaDriver([], [])
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "captcha_solver.CAPTCHA_DEBUG_DIR",
+            tmpdir,
+        ):
+            with self.assertRaisesRegex(ValueError, "captcha"):
+                solver._get_captcha_info(driver, timeout=0, poll_interval=0)
+
+            self.assertTrue(any(name.endswith(".html") for name in os.listdir(tmpdir)))
 
     def test_parse_glm_result_falls_back_to_bbox_center(self):
         solver = self.make_solver()

@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PIL import Image, ImageDraw
 import requests
+from captcha_vision import detect_colored_text_bboxes
 
 # GLM-OCR endpoint configuration
 GLM_ENDPOINT = os.environ.get("GLM_ENDPOINT", "http://localhost:8000/glmocr/parse")
@@ -32,29 +33,44 @@ GLM_TIMEOUT = 10
 TEST_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "test.png")
 OUTPUT_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "test_output.png")
 SAMPLE_DIR = os.path.join(os.path.dirname(__file__), "captcha_samples")
+FAILURE_SAMPLE_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "models",
+    "captcha_failures",
+)
+
+
+def is_valid_image(path: str) -> bool:
+    try:
+        with Image.open(path) as image:
+            image.verify()
+        return True
+    except Exception:
+        return False
 
 
 def find_latest_captured_sample() -> tuple[str, list[str]] | None:
-    if not os.path.isdir(SAMPLE_DIR):
-        return None
+    for sample_dir in (FAILURE_SAMPLE_DIR, SAMPLE_DIR):
+        if not os.path.isdir(sample_dir):
+            continue
 
-    metadata_files = sorted(
-        [
-            os.path.join(SAMPLE_DIR, name)
-            for name in os.listdir(SAMPLE_DIR)
-            if name.endswith(".json")
-        ],
-        reverse=True,
-    )
-    for metadata_path in metadata_files:
-        with open(metadata_path, "r", encoding="utf-8") as f:
-            metadata = json.load(f)
-        image_name = metadata.get("image")
-        targets = metadata.get("targets")
-        if image_name and targets:
-            image_path = os.path.join(SAMPLE_DIR, image_name)
-            if os.path.exists(image_path):
-                return image_path, targets
+        metadata_files = sorted(
+            [
+                os.path.join(sample_dir, name)
+                for name in os.listdir(sample_dir)
+                if name.endswith(".json")
+            ],
+            reverse=True,
+        )
+        for metadata_path in metadata_files:
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+            image_name = metadata.get("image")
+            targets = metadata.get("targets")
+            if image_name and targets:
+                image_path = os.path.join(sample_dir, image_name)
+                if os.path.exists(image_path) and is_valid_image(image_path):
+                    return image_path, targets
     return None
 
 
@@ -182,6 +198,23 @@ def draw_circles_on_image(
     print(f"\nOutput saved to: {output_path}")
 
 
+def draw_debug_boxes_on_image(image_path: str, output_path: str, order_words: list[str] = None) -> None:
+    img = Image.open(image_path)
+    draw = ImageDraw.Draw(img)
+    boxes = detect_colored_text_bboxes(img)
+
+    for idx, (x1, y1, x2, y2) in enumerate(boxes, start=1):
+        draw.rectangle([x1, y1, x2, y2], outline="red", width=3)
+        draw.text((x1, max(0, y1 - 12)), f"box{idx}", fill="red")
+
+    if order_words:
+        draw.text((10, 10), "targets: " + ",".join(order_words), fill="blue")
+
+    img.save(output_path)
+    print(f"\nDebug overlay saved to: {output_path}")
+    print(f"Detected {len(boxes)} colored candidate boxes")
+
+
 def main():
     print("=" * 60)
     print("GLM-OCR Captcha Solver Test")
@@ -252,13 +285,8 @@ def main():
     if chars_with_pos:
         draw_circles_on_image(test_image_path, OUTPUT_IMAGE_PATH, chars_with_pos, order_words)
     else:
-        # Create a placeholder output showing the original image
-        img = Image.open(test_image_path)
-        draw = ImageDraw.Draw(img)
-        draw.text((10, 10), "GLM-OCR not available", fill="red")
-        img.save(OUTPUT_IMAGE_PATH)
-        print(f"\nOriginal image saved to: {OUTPUT_IMAGE_PATH}")
-        print("(No OCR results to annotate)")
+        draw_debug_boxes_on_image(test_image_path, OUTPUT_IMAGE_PATH, order_words)
+        print("(No OCR results; drew local colored candidate boxes)")
         sys.exit(1)
 
 

@@ -48,15 +48,16 @@ class GlmOcrScriptTests(unittest.TestCase):
 
     def test_find_latest_captured_sample(self):
         original_sample_dir = glm_ocr_script.SAMPLE_DIR
+        original_failure_sample_dir = glm_ocr_script.FAILURE_SAMPLE_DIR
         with tempfile.TemporaryDirectory() as tmpdir:
             image_path = os.path.join(tmpdir, "captcha.png")
             metadata_path = os.path.join(tmpdir, "captcha.json")
-            with open(image_path, "wb") as f:
-                f.write(b"image")
+            Image.new("RGB", (20, 20), "white").save(image_path)
             with open(metadata_path, "w", encoding="utf-8") as f:
                 json.dump({"image": "captcha.png", "targets": ["件"]}, f)
 
             glm_ocr_script.SAMPLE_DIR = tmpdir
+            glm_ocr_script.FAILURE_SAMPLE_DIR = os.path.join(tmpdir, "missing")
             try:
                 self.assertEqual(
                     glm_ocr_script.find_latest_captured_sample(),
@@ -64,12 +65,66 @@ class GlmOcrScriptTests(unittest.TestCase):
                 )
             finally:
                 glm_ocr_script.SAMPLE_DIR = original_sample_dir
+                glm_ocr_script.FAILURE_SAMPLE_DIR = original_failure_sample_dir
+
+    def test_find_latest_captured_sample_prefers_failure_samples(self):
+        original_sample_dir = glm_ocr_script.SAMPLE_DIR
+        original_failure_sample_dir = glm_ocr_script.FAILURE_SAMPLE_DIR
+        with tempfile.TemporaryDirectory() as tmpdir:
+            captured_dir = os.path.join(tmpdir, "captured")
+            failure_dir = os.path.join(tmpdir, "failures")
+            os.makedirs(captured_dir)
+            os.makedirs(failure_dir)
+            Image.new("RGB", (20, 20), "white").save(os.path.join(captured_dir, "old.png"))
+            with open(os.path.join(captured_dir, "old.json"), "w", encoding="utf-8") as f:
+                json.dump({"image": "old.png", "targets": ["旧"]}, f)
+            Image.new("RGB", (20, 20), "white").save(os.path.join(failure_dir, "new.png"))
+            with open(os.path.join(failure_dir, "new.json"), "w", encoding="utf-8") as f:
+                json.dump({"image": "new.png", "targets": ["新"]}, f)
+
+            glm_ocr_script.SAMPLE_DIR = captured_dir
+            glm_ocr_script.FAILURE_SAMPLE_DIR = failure_dir
+            try:
+                self.assertEqual(
+                    glm_ocr_script.find_latest_captured_sample(),
+                    (os.path.join(failure_dir, "new.png"), ["新"]),
+                )
+            finally:
+                glm_ocr_script.SAMPLE_DIR = original_sample_dir
+                glm_ocr_script.FAILURE_SAMPLE_DIR = original_failure_sample_dir
+
+    def test_find_latest_captured_sample_skips_invalid_images(self):
+        original_sample_dir = glm_ocr_script.SAMPLE_DIR
+        original_failure_sample_dir = glm_ocr_script.FAILURE_SAMPLE_DIR
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "bad.png"), "wb") as f:
+                f.write(b"not-an-image")
+            with open(os.path.join(tmpdir, "bad.json"), "w", encoding="utf-8") as f:
+                json.dump({"image": "bad.png", "targets": ["坏"]}, f)
+            Image.new("RGB", (20, 20), "white").save(os.path.join(tmpdir, "good.png"))
+            with open(os.path.join(tmpdir, "good.json"), "w", encoding="utf-8") as f:
+                json.dump({"image": "good.png", "targets": ["好"]}, f)
+
+            glm_ocr_script.SAMPLE_DIR = tmpdir
+            glm_ocr_script.FAILURE_SAMPLE_DIR = os.path.join(tmpdir, "missing")
+            try:
+                self.assertEqual(
+                    glm_ocr_script.find_latest_captured_sample(),
+                    (os.path.join(tmpdir, "good.png"), ["好"]),
+                )
+            finally:
+                glm_ocr_script.SAMPLE_DIR = original_sample_dir
+                glm_ocr_script.FAILURE_SAMPLE_DIR = original_failure_sample_dir
 
     def test_main_exits_nonzero_when_no_positions_are_returned(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             image_path = os.path.join(tmpdir, "captcha.png")
             output_path = os.path.join(tmpdir, "output.png")
-            Image.new("RGB", (20, 20), "white").save(image_path)
+            image = Image.new("RGB", (80, 40), "white")
+            for x in range(10, 30):
+                for y in range(8, 28):
+                    image.putpixel((x, y), (200, 20, 20))
+            image.save(image_path)
 
             with patch.object(
                 glm_ocr_script,
@@ -85,6 +140,8 @@ class GlmOcrScriptTests(unittest.TestCase):
 
             self.assertEqual(exc.exception.code, 1)
             self.assertTrue(os.path.exists(output_path))
+            annotated = Image.open(output_path).convert("RGB")
+            self.assertNotEqual(annotated.getpixel((10, 8)), (200, 20, 20))
 
 
 if __name__ == "__main__":
