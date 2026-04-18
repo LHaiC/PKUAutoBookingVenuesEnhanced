@@ -85,6 +85,7 @@ def capture(config_path: str, browser: str, headless: bool, output_dir: str) -> 
         glm_endpoint,
         glm_timeout,
         allow_chaojiying_fallback,
+        _auto_campus_card_pay,
     ) = load_config(config_path)
 
     driver = build_driver(browser, headless)

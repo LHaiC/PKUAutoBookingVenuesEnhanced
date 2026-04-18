@@ -9,12 +9,15 @@ except ModuleNotFoundError:
 from urllib.parse import quote
 import time
 import datetime
+import os
 import warnings
 from chaojiying import *
 import base64
 import re
 
 warnings.filterwarnings('ignore')
+
+PAYMENT_DEBUG_DIR = "models/payment_debug"
 
 
 VENUE_ALIASES = {
@@ -438,6 +441,113 @@ def click_submit_order(driver):
     return log_str
 
 
+def _element_is_displayed(element):
+    try:
+        return element.is_displayed()
+    except Exception:
+        return True
+
+
+def _element_payment_text(element):
+    parts = [getattr(element, "text", "") or ""]
+    for attr in ("title", "aria-label", "value"):
+        try:
+            parts.append(element.get_attribute(attr) or "")
+        except Exception:
+            pass
+    return " ".join(parts).strip()
+
+
+def _element_area(element):
+    size = getattr(element, "size", None) or {}
+    rect = getattr(element, "rect", None) or {}
+    width = size.get("width") or rect.get("width") or 0
+    height = size.get("height") or rect.get("height") or 0
+    return width * height
+
+
+def _payment_debug_snapshot(driver, reason, output_dir=PAYMENT_DEBUG_DIR):
+    os.makedirs(output_dir, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    html_path = os.path.join(output_dir, f"payment-{reason}-{stamp}.html")
+    screenshot_path = os.path.join(output_dir, f"payment-{reason}-{stamp}.png")
+
+    try:
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(getattr(driver, "page_source", ""))
+        print(f"已保存付款页面调试快照: {html_path}")
+    except Exception as exc:
+        print(f"保存付款页面HTML失败: {exc}")
+
+    try:
+        driver.save_screenshot(screenshot_path)
+        print(f"已保存付款页面截图: {screenshot_path}")
+    except Exception as exc:
+        print(f"保存付款页面截图失败: {exc}")
+
+
+def campus_card_payment_candidates(driver):
+    locators = [
+        "//*[contains(normalize-space(.), '校园卡') and "
+        "(contains(normalize-space(.), '支付') or contains(normalize-space(.), '付款'))]",
+        "//*[contains(normalize-space(.), '校园卡')]",
+    ]
+    candidates = []
+    seen = set()
+
+    for xpath in locators:
+        try:
+            elements = driver.find_elements(By.XPATH, xpath)
+        except Exception:
+            elements = []
+        for element in elements:
+            if id(element) in seen or not _element_is_displayed(element):
+                continue
+            text = _element_payment_text(element)
+            if "校园卡" not in text:
+                continue
+            seen.add(id(element))
+            candidates.append(element)
+
+    candidates.sort(
+        key=lambda element: (
+            0 if any(word in _element_payment_text(element) for word in ("支付", "付款")) else 1,
+            _element_area(element) or 10**9,
+        )
+    )
+    return candidates
+
+
+def click_campus_card_payment(driver, timeout=10, poll_interval=0.2):
+    driver.switch_to.window(driver.window_handles[-1])
+    try:
+        WebDriverWait(driver, 10).until_not(
+            EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
+    except Exception:
+        pass
+
+    deadline = time.time() + timeout
+    while True:
+        candidates = campus_card_payment_candidates(driver)
+        if candidates:
+            element = candidates[0]
+            try:
+                driver.execute_script('arguments[0].scrollIntoView({block: "center"});', element)
+            except Exception:
+                pass
+            time.sleep(0.2)
+            try:
+                element.click()
+            except Exception:
+                driver.execute_script('arguments[0].click();', element)
+            return element
+
+        if time.time() >= deadline:
+            _payment_debug_snapshot(driver, "campus-card-not-found")
+            raise RuntimeError("找不到校园卡付款入口")
+        time.sleep(poll_interval)
+
+
 def verify(driver, glm_enabled, glm_endpoint, glm_timeout,
            allow_chaojiying_fallback, cy_username, cy_password, cy_soft_id):
     from captcha_solver import solve_captcha
@@ -446,12 +556,17 @@ def verify(driver, glm_enabled, glm_endpoint, glm_timeout,
                          cy_soft_id)
 
 
-def click_pay(driver):
+def click_pay(driver, auto_campus_card_pay=False, timeout=10, manual_wait_seconds=30):
     print("付款（校园卡）")
     log_str = "付款（校园卡）\n"
-    time.sleep(30)
-    print("需要用户自行付款")
-    log_str += "需要用户自行付款\n"
+    if auto_campus_card_pay:
+        click_campus_card_payment(driver, timeout=timeout)
+        print("已自动点击校园卡付款入口")
+        log_str += "已自动点击校园卡付款入口\n"
+    else:
+        time.sleep(manual_wait_seconds)
+        print("需要用户自行付款")
+        log_str += "需要用户自行付款\n"
     return log_str
 
 

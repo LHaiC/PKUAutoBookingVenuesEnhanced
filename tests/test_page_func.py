@@ -7,9 +7,57 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from page_func import (
     booking_venue_kind,
+    click_campus_card_payment,
+    click_pay,
     time_column_from_rows,
     venue_card_xpath,
 )
+
+
+class FakePaymentElement:
+    def __init__(self, text, displayed=True, width=120, height=40):
+        self.text = text
+        self.displayed = displayed
+        self.size = {"width": width, "height": height}
+        self.rect = {"width": width, "height": height}
+        self.clicked = False
+
+    def is_displayed(self):
+        return self.displayed
+
+    def get_attribute(self, name):
+        return ""
+
+    def click(self):
+        self.clicked = True
+
+
+class FakeSwitchTo:
+    def window(self, _handle):
+        pass
+
+
+class FakePaymentDriver:
+    window_handles = ["main"]
+
+    def __init__(self, elements):
+        self.elements = elements
+        self.switch_to = FakeSwitchTo()
+        self.page_source = "<html>payment</html>"
+        self.scripts = []
+        self.screenshot_path = None
+
+    def find_elements(self, _by, _value):
+        return self.elements
+
+    def execute_script(self, script, element=None):
+        self.scripts.append(script)
+        if "click" in script and element is not None:
+            element.clicked = True
+
+    def save_screenshot(self, path):
+        self.screenshot_path = path
+        return True
 
 
 class PageFuncTests(unittest.TestCase):
@@ -48,6 +96,33 @@ class PageFuncTests(unittest.TestCase):
         ]
 
         self.assertIsNone(time_column_from_rows(rows, start_time))
+
+    def test_click_campus_card_payment_clicks_visible_payment_option(self):
+        campus_card = FakePaymentElement("校园卡付款")
+        driver = FakePaymentDriver([campus_card])
+
+        clicked = click_campus_card_payment(driver, timeout=0, poll_interval=0)
+
+        self.assertIs(clicked, campus_card)
+        self.assertTrue(campus_card.clicked)
+
+    def test_click_pay_waits_for_manual_payment_by_default(self):
+        campus_card = FakePaymentElement("校园卡付款")
+        driver = FakePaymentDriver([campus_card])
+
+        log = click_pay(driver, auto_campus_card_pay=False, manual_wait_seconds=0)
+
+        self.assertFalse(campus_card.clicked)
+        self.assertIn("需要用户自行付款", log)
+
+    def test_click_pay_auto_mode_raises_when_campus_card_option_missing(self):
+        with self.assertRaisesRegex(RuntimeError, "校园卡"):
+            click_pay(
+                FakePaymentDriver([]),
+                auto_campus_card_pay=True,
+                timeout=0,
+                manual_wait_seconds=0,
+            )
 
 
 if __name__ == "__main__":

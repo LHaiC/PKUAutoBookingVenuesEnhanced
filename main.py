@@ -126,11 +126,16 @@ def load_config(config):
         if conf.has_option('glm_ocr', 'allow_chaojiying_fallback')
         else False
     )
+    auto_campus_card_pay = (
+        conf.getboolean('payment', 'auto_campus_card_pay')
+        if conf.has_option('payment', 'auto_campus_card_pay')
+        else False
+    )
 
     return (
         user_name, password, venue, venue_num, start_time, end_time, wechat_notice,
         sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout,
-        allow_chaojiying_fallback,
+        allow_chaojiying_fallback, auto_campus_card_pay,
     )
 
 
@@ -150,7 +155,7 @@ def page(config, browser="chrome"):
     (
         user_name, password, venue, venue_num, start_time, end_time, wechat_notice,
         sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout,
-        allow_chaojiying_fallback,
+        allow_chaojiying_fallback, auto_campus_card_pay,
     ) = load_config(config)
 
     log_str = ""
@@ -215,7 +220,7 @@ def page(config, browser="chrome"):
             status = False
     if status:
         try:
-            log_str += click_pay(driver)
+            log_str += click_pay(driver, auto_campus_card_pay=auto_campus_card_pay)
         except:
             log_str += "付款失败\n"
             print("付款失败\n")
