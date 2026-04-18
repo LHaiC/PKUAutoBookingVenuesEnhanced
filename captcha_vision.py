@@ -160,6 +160,18 @@ def detect_colored_text_bboxes(
     return [box for box in merged if validate_bbox(box, image.size)]
 
 
+def filter_captcha_text_bboxes(
+    boxes: list[list[int]],
+    min_width: int = 24,
+    min_height: int = 24,
+) -> list[list[int]]:
+    return [
+        box
+        for box in boxes
+        if len(box) == 4 and box[2] - box[0] >= min_width and box[3] - box[1] >= min_height
+    ]
+
+
 def isolate_colored_text(image: Image.Image) -> Image.Image:
     rgb = image.convert("RGB")
     clean = Image.new("RGB", rgb.size, "white")
@@ -178,11 +190,12 @@ def isolate_colored_text(image: Image.Image) -> Image.Image:
 
 def build_colored_text_strip(
     image: Image.Image,
+    boxes: list[list[int]] | None = None,
     padding: int = 5,
     gap: int = 20,
     margin: int = 20,
 ) -> Image.Image | None:
-    boxes = detect_colored_text_bboxes(image)
+    boxes = detect_colored_text_bboxes(image) if boxes is None else boxes
     if not boxes:
         return None
 

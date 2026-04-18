@@ -21,6 +21,7 @@ from captcha_vision import (
     build_colored_text_strip,
     decode_image,
     detect_colored_text_bboxes,
+    filter_captcha_text_bboxes,
     image_size,
     refine_bbox_to_dark_pixels,
 )
@@ -110,6 +111,7 @@ def parse_model_output(output: str) -> list[dict]:
             text_segment = line.strip()
             if not text_segment:
                 continue
+            text_segment = text_segment.replace("场馆预约", "")
             if any(keyword in text_segment for keyword in ("请", "验证", "点击", "场馆", "预约", "完成", "安全")):
                 continue
             if re.search(r"[:：]", text_segment):
@@ -118,33 +120,96 @@ def parse_model_output(output: str) -> list[dict]:
     return [{"text": char, "bbox": [], "confidence": 0.50} for char in chars]
 
 
-def attach_colored_text_bboxes(image: Image.Image, candidates: list[dict]) -> list[dict]:
+def attach_colored_text_bboxes(
+    image: Image.Image,
+    candidates: list[dict],
+    boxes: list[list[int]] | None = None,
+    trim_to_boxes: bool = False,
+) -> list[dict]:
     if not candidates:
         return candidates
     if all(len(item.get("bbox", [])) == 4 for item in candidates):
         return candidates
 
-    boxes = detect_colored_text_bboxes(image)
-    if len(boxes) < len(candidates):
+    boxes = detect_colored_text_bboxes(image) if boxes is None else boxes
+    if not boxes:
         return candidates
 
     updated = []
-    for item, bbox in zip(candidates, boxes):
+    for item, bbox in zip(candidates[: len(boxes)], boxes):
         item = dict(item)
         if len(item.get("bbox", [])) != 4:
             item["bbox"] = bbox
         updated.append(item)
+    if not trim_to_boxes:
+        updated.extend(candidates[len(updated) :])
     return updated
 
 
-def prepare_recognition_image_bytes(image: Image.Image, use_strip: bool) -> bytes:
-    recognition_image = build_colored_text_strip(image) if use_strip else None
+def prepare_recognition_image_bytes(
+    image: Image.Image,
+    use_strip: bool,
+    boxes: list[list[int]] | None = None,
+) -> bytes:
+    recognition_image = build_colored_text_strip(image, boxes=boxes) if use_strip else None
     if recognition_image is None:
         recognition_image = image
 
     buf = io.BytesIO()
     recognition_image.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def candidates_from_output(
+    image: Image.Image,
+    output: str,
+    boxes: list[list[int]],
+) -> list:
+    candidates = attach_colored_text_bboxes(
+        image,
+        parse_model_output(output),
+        boxes=boxes,
+        trim_to_boxes=True,
+    )
+    refined_items = []
+    for item in candidates:
+        bbox = item.get("bbox", [])
+        if len(bbox) == 4:
+            item = dict(item)
+            item["bbox"] = refine_bbox_to_dark_pixels(image, [int(v) for v in bbox])
+        refined_items.append(item)
+    return normalize_candidates(refined_items)
+
+
+def match_targets_from_views(
+    targets: list[str],
+    candidate_views: list[list],
+    size: tuple[int, int],
+) -> list[dict]:
+    matched = []
+    used_bboxes = set()
+
+    for target in targets:
+        selected = None
+        for candidates in candidate_views:
+            target_matches = [
+                candidate
+                for candidate in candidates
+                if candidate.text == target and tuple(candidate.bbox) not in used_bboxes
+            ]
+            if len(target_matches) > 1:
+                raise MatchError(f"ambiguous target: {target}")
+            if target_matches:
+                selected = target_matches[0]
+                break
+        if selected is None:
+            raise MatchError(f"missing target: {target}")
+
+        result = match_targets([target], [selected], size)[0]
+        used_bboxes.add(tuple(selected.bbox))
+        matched.append(result)
+
+    return matched
 
 
 @contextmanager
@@ -220,33 +285,40 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     size = image_size(image)
-    recognition_bytes = prepare_recognition_image_bytes(image, use_strip=bool(targets))
-    raw_output = engine.recognize(recognition_bytes, None)
-    raw_candidates = attach_colored_text_bboxes(image, parse_model_output(raw_output))
+    detected_boxes = detect_colored_text_bboxes(image)
+    boxes = filter_captcha_text_bboxes(detected_boxes) or detected_boxes
 
     if targets:
-        refined_items = []
-        for item in raw_candidates:
-            bbox = item.get("bbox", [])
-            if len(bbox) == 4:
-                item = dict(item)
-                item["bbox"] = refine_bbox_to_dark_pixels(image, [int(v) for v in bbox])
-            refined_items.append(item)
-
-        candidates = normalize_candidates(refined_items)
+        original_output = engine.recognize(image_bytes, None)
+        original_candidates = candidates_from_output(image, original_output, boxes)
         try:
-            results = match_targets(targets, candidates, size)
+            results = match_targets(targets, original_candidates, size)
+            raw_output = original_output
         except MatchError as exc:
-            return {
-                "results": [],
-                "error": "unsafe_ocr_output",
-                "detail": str(exc),
-                "image_size": list(size),
-                "method": "glm_ocr_transformers_with_local_positioning",
-                "raw_output": raw_output,
-            }
+            recognition_bytes = prepare_recognition_image_bytes(image, use_strip=True, boxes=boxes)
+            strip_output = engine.recognize(recognition_bytes, None)
+            strip_candidates = candidates_from_output(image, strip_output, boxes)
+            raw_outputs = [original_output, strip_output]
+            try:
+                results = match_targets_from_views(
+                    targets,
+                    [original_candidates, strip_candidates],
+                    size,
+                )
+                raw_output = "\n".join(raw_outputs)
+            except MatchError as fallback_exc:
+                return {
+                    "results": [],
+                    "error": "unsafe_ocr_output",
+                    "detail": str(fallback_exc),
+                    "image_size": list(size),
+                    "method": "glm_ocr_transformers_with_local_positioning",
+                    "raw_output": original_output,
+                    "raw_outputs": raw_outputs,
+                }
     else:
-        results = raw_candidates
+        raw_output = engine.recognize(image_bytes, None)
+        results = attach_colored_text_bboxes(image, parse_model_output(raw_output))
 
     return {
         "results": results,

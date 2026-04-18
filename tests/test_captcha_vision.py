@@ -13,6 +13,7 @@ from captcha_vision import (
     decode_image,
     detect_colored_text_bboxes,
     detect_dark_regions,
+    filter_captcha_text_bboxes,
     image_size,
     refine_bbox_to_dark_pixels,
     validate_bbox,
@@ -115,6 +116,23 @@ class CaptchaVisionTests(unittest.TestCase):
         img = Image.new("RGB", (160, 80), (220, 240, 250))
 
         self.assertIsNone(build_colored_text_strip(img))
+
+    def test_filter_captcha_text_bboxes_removes_small_colored_noise(self):
+        self.assertEqual(
+            filter_captcha_text_bboxes(
+                [
+                    [97, 23, 136, 61],
+                    [136, 73, 174, 106],
+                    [158, 118, 184, 132],
+                    [210, 46, 252, 85],
+                ]
+            ),
+            [
+                [97, 23, 136, 61],
+                [136, 73, 174, 106],
+                [210, 46, 252, 85],
+            ],
+        )
 
 
 if __name__ == "__main__":

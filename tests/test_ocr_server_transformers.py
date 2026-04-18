@@ -69,14 +69,17 @@ class FakeRecordingEngine:
     model_path = "fake"
     loaded = True
 
-    def __init__(self):
-        self.received_targets = "unset"
-        self.received_size = None
+    def __init__(self, outputs=None):
+        self.outputs = list(outputs or ["工产建穿"])
+        self.received_targets = []
+        self.received_sizes = []
 
     def recognize(self, image_bytes, targets):
-        self.received_targets = targets
-        self.received_size = Image.open(io.BytesIO(image_bytes)).size
-        return "工产建穿"
+        self.received_targets.append(targets)
+        self.received_sizes.append(Image.open(io.BytesIO(image_bytes)).size)
+        if len(self.received_sizes) <= len(self.outputs):
+            return self.outputs[len(self.received_sizes) - 1]
+        return self.outputs[-1]
 
 
 class OcrServerTransformerTests(unittest.TestCase):
@@ -291,12 +294,43 @@ class OcrServerTransformerTests(unittest.TestCase):
             )
         )
 
-        self.assertIsNone(recording_engine.received_targets)
-        self.assertNotEqual(recording_engine.received_size, (310, 155))
+        self.assertTrue(recording_engine.received_targets)
+        self.assertTrue(all(targets is None for targets in recording_engine.received_targets))
         self.assertEqual([item["text"] for item in response["results"]], ["穿", "产", "工"])
         self.assertEqual(response["results"][0]["x"], 224)
         self.assertEqual(response["results"][1]["x"], 101)
         self.assertEqual(response["results"][2]["x"], 41)
+
+    def test_parse_route_combines_original_and_strip_recognition_for_targets(self):
+        recording_engine = FakeRecordingEngine(
+            [
+                "开此出茶场馆预约",
+                "此出系",
+            ]
+        )
+        ocr_server_transformers.engine = recording_engine
+        image = Image.new("RGB", (310, 155), (245, 248, 250))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([97, 23, 135, 60], fill=(25, 80, 140))
+        draw.rectangle([136, 73, 173, 105], fill=(220, 20, 170))
+        draw.rectangle([210, 46, 251, 84], fill=(25, 80, 140))
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        response = parse(
+            ParseRequest(
+                images=[f"data:image/png;base64,{payload}"],
+                targets=["开", "此", "系"],
+            )
+        )
+
+        self.assertGreaterEqual(len(recording_engine.received_targets), 2)
+        self.assertTrue(all(targets is None for targets in recording_engine.received_targets))
+        self.assertEqual([item["text"] for item in response["results"]], ["开", "此", "系"])
+        self.assertEqual(response["results"][0]["x"], 116)
+        self.assertEqual(response["results"][1]["x"], 155)
+        self.assertEqual(response["results"][2]["x"], 231)
 
     def test_parse_route_fails_closed_for_plain_text_with_targets(self):
         ocr_server_transformers.engine = FakeEngine()
