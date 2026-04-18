@@ -90,6 +90,8 @@ def target_date_from_token(token, today=None):
     if weekday < 1 or weekday > 7:
         raise ValueError(f"weekday must be 1-7: {token}")
     delta_days = (weekday - 1 - today.weekday()) % 7
+    if delta_days == 0:
+        delta_days = 7
     return today + dt.timedelta(days=delta_days)
 
 

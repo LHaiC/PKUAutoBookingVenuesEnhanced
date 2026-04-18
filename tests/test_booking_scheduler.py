@@ -28,6 +28,12 @@ class BookingSchedulerTests(unittest.TestCase):
 
         self.assertEqual(target_date_from_token("3-0650", today), datetime.date(2026, 4, 22))
 
+    def test_same_weekday_token_maps_to_next_week(self):
+        today = datetime.date(2026, 4, 18)
+
+        self.assertEqual(target_date_from_token("6-1300", today), datetime.date(2026, 4, 25))
+        self.assertEqual(release_datetime_for_token("6-1300", today), datetime.datetime(2026, 4, 22, 12, 0))
+
     def test_task_is_due_one_minute_before_release_time(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = os.path.join(tmpdir, "wusi.ini")

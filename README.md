@@ -103,7 +103,7 @@ cp config.example.ini config.ini
 - `[login] user_name/password`：IAAA 账号密码。
 - `[type] venue`：推荐写完整父子场馆名，例如 `五四体育中心-羽毛球馆` 或 `邱德拔体育馆-羽毛球场`。
 - `[type] venue_num`：指定场地编号填正整数；随机场地填 `-1`。
-- `[time] start_time/end_time`：支持 `YYYYMMDD-HHMM` 或 `星期-HHMM`，星期格式中 `1` 到 `7` 表示周一到周日。
+- `[time] start_time/end_time`：支持 `YYYYMMDD-HHMM` 或 `星期-HHMM`，星期格式中 `1` 到 `7` 表示周一到周日。调度器里如果星期等于今天，会按下周同一天处理。
 - `[glm_ocr] endpoint`：默认 `http://localhost:8000`，与 OCR 服务端口一致。
 
 多个候选时段用 `/` 分隔：
