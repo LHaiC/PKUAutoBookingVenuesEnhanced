@@ -64,6 +64,25 @@ def booking_venue_kind(venue):
     return place
 
 
+def booking_first_slot_hour(venue):
+    venue = booking_venue_kind(venue)
+    if venue == "羽毛球馆":
+        return 6
+    if venue == "羽毛球场":
+        return 8
+    return 0
+
+
+def booking_slot_page_and_column(venue, start_time):
+    first_hour = booking_first_slot_hour(venue)
+    start = str(start_time).split()[1]
+    start_hour = int(start[:2])
+    slot_offset = start_hour - first_hour
+    if slot_offset < 0:
+        raise ValueError(f"预约开始时间早于场馆开放时间: {start}")
+    return slot_offset // 5, slot_offset % 5 + 1
+
+
 def click_venue_card(driver, venue):
     candidates = [venue_card_xpath(venue)]
     hall_xpath = sports_hall_place_xpath(venue)
@@ -273,16 +292,7 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
                             '//*[@id="scrollTable"]/table/tbody/tr[last()]/td[last()]/div/i').click()
 
     def page_num(venue, start_time):
-        venue = booking_venue_kind(venue)
-        start = str(start_time).split()[1]
-        list_num = int(start[:2])
-        if venue == "羽毛球场":
-            lst = [0, 0, 0, 0, 0, 0, 0, 0, [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [2, 1], [2, 2], [2, 3], [2, 4], [2, 5]]
-            return lst[list_num][0], lst[list_num][1]
-        if venue == "羽毛球馆":
-            lst = [0, 0, 0, 0, 0, 0, 0, [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [2, 1], [2, 2], [2, 3], [2, 4], [2, 5], [3, 1]]
-            return lst[list_num][0], lst[list_num][1]
-        return 0, 0
+        return booking_slot_page_and_column(venue, start_time)
 
     def click_free(venue_num_click, time_num):
         WebDriverWait(driver, 5).until_not(
