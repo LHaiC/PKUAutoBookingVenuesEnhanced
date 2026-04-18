@@ -5,6 +5,9 @@ Captcha Solver with dual-mode support:
 """
 
 import base64
+import datetime
+import json
+import os
 import time
 import requests
 
@@ -92,6 +95,8 @@ class CaptchaSolver:
             response = requests.post(url, json=payload, timeout=self.glm_timeout)
             response.raise_for_status()
             result = response.json()
+            if isinstance(result, dict) and result.get("error"):
+                self._log_glm_failure(result)
             return self._parse_glm_result(result, order_words)
         except requests.exceptions.Timeout:
             print(f"GLM-OCR timeout after {self.glm_timeout}s")
@@ -102,6 +107,38 @@ class CaptchaSolver:
         except Exception as e:
             print(f"GLM-OCR error: {e}")
             return None
+
+    def _log_glm_failure(self, result):
+        error = result.get("error")
+        detail = result.get("detail")
+        raw_output = result.get("raw_output")
+        print(f"GLM-OCR returned {error}: {detail}")
+        if raw_output:
+            raw_preview = str(raw_output).replace("\n", "\\n")
+            print(f"GLM-OCR raw_output: {raw_preview[:300]}")
+
+    def _save_debug_sample(
+        self,
+        image_content,
+        order_words,
+        reason,
+        output_dir="models/captcha_failures",
+    ):
+        os.makedirs(output_dir, exist_ok=True)
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        image_path = os.path.join(output_dir, f"captcha-{stamp}.png")
+        meta_path = os.path.join(output_dir, f"captcha-{stamp}.json")
+        with open(image_path, "wb") as f:
+            f.write(image_content)
+        metadata = {
+            "targets": order_words,
+            "image": os.path.basename(image_path),
+            "reason": reason,
+            "captured_at": stamp,
+        }
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+        return image_path, meta_path
 
     def _parse_glm_result(self, result, order_words):
         """
@@ -342,6 +379,16 @@ class CaptchaSolver:
                         time.sleep(1)
 
             if words_loc is None:
+                try:
+                    image_path, meta_path = self._save_debug_sample(
+                        image_content,
+                        order_words,
+                        "captcha_solve_failed",
+                    )
+                    print(f"已保存验证码调试样本: {image_path}")
+                    print(f"已保存验证码调试元数据: {meta_path}")
+                except Exception as exc:
+                    print(f"保存验证码调试样本失败: {exc}")
                 log_str += "安全验证失败：无法识别验证码\n"
                 print("安全验证失败：无法识别验证码")
                 raise CaptchaSolveError(log_str.rstrip())

@@ -1,6 +1,7 @@
 import os
 import unittest
 from unittest.mock import patch
+import tempfile
 
 from captcha_solver import CaptchaSolveError, CaptchaSolver
 from ocr_server_transformers import GlmOcrEngine
@@ -123,6 +124,43 @@ class CaptchaSolverTests(unittest.TestCase):
         payload = post.call_args.kwargs["json"]
         self.assertEqual(payload["targets"], ["件", "叶"])
         self.assertEqual(list(payload), ["images", "targets"])
+
+    def test_solve_with_glm_logs_unsafe_ocr_diagnostics(self):
+        solver = self.make_solver()
+        response = FakeResponse(
+            {
+                "results": [],
+                "error": "unsafe_ocr_output",
+                "detail": "missing target: 件",
+                "raw_output": "识别结果：叶结",
+            }
+        )
+
+        with patch("captcha_solver.requests.post", return_value=response), patch("builtins.print") as printed:
+            result = solver._solve_with_glm(b"image-bytes", ["件", "叶"])
+
+        self.assertIsNone(result)
+        output = "\n".join(str(call.args[0]) for call in printed.call_args_list)
+        self.assertIn("unsafe_ocr_output", output)
+        self.assertIn("missing target: 件", output)
+        self.assertIn("识别结果：叶结", output)
+
+    def test_save_debug_sample_writes_image_and_metadata(self):
+        solver = self.make_solver()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_path, meta_path = solver._save_debug_sample(
+                b"image-bytes",
+                ["件", "叶"],
+                "glm_failed",
+                output_dir=tmpdir,
+            )
+
+            self.assertTrue(os.path.exists(image_path))
+            self.assertTrue(os.path.exists(meta_path))
+            with open(meta_path, encoding="utf-8") as f:
+                metadata = f.read()
+            self.assertIn("glm_failed", metadata)
+            self.assertIn("件", metadata)
 
     def test_parse_glm_result_falls_back_to_bbox_center(self):
         solver = self.make_solver()
