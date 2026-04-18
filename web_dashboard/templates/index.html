@@ -67,6 +67,21 @@
                 <input id="slot-hours" type="number" min="1" step="1" value="1">
             </div>
         </div>
+        <div id="slot-preview" class="status"></div>
+        <details>
+            <summary>高级时间配置</summary>
+            <p class="small">需要多个候选时段时，在这里直接编辑 config 的原始 time.start_time/time.end_time；普通表单会同步写入这里。</p>
+            <div class="grid">
+                <div class="wide">
+                    <label>time.start_time</label>
+                    <input id="advanced-start-time" placeholder="20260422-1300 或 6-1300/6-1400">
+                </div>
+                <div class="wide">
+                    <label>time.end_time</label>
+                    <input id="advanced-end-time" placeholder="20260422-1500 或 6-1400/6-1500">
+                </div>
+            </div>
+        </details>
         <div class="actions">
             <button onclick="loadConfig()">读取配置</button>
             <button onclick="applySlotRange()" class="secondary">生成连续时段</button>
@@ -113,7 +128,7 @@
 <script>
 const fields = [
     ["login", "user_name"], ["login", "password"], ["type", "venue"], ["type", "venue_num"],
-    ["time", "start_time"], ["time", "end_time"], ["wechat", "wechat_notice"], ["wechat", "SCKEY"],
+    ["wechat", "wechat_notice"], ["wechat", "SCKEY"],
     ["chaojiying", "username"], ["chaojiying", "password"], ["chaojiying", "soft_id"],
     ["glm_ocr", "enabled"], ["glm_ocr", "endpoint"], ["glm_ocr", "timeout"], ["glm_ocr", "allow_chaojiying_fallback"]
 ];
@@ -127,11 +142,15 @@ function renderFields(values) {
     root.innerHTML = "";
     fields.forEach(([section, option]) => {
         const wrap = document.createElement("div");
-        if (option === "start_time" || option === "end_time") wrap.className = "wide";
         wrap.innerHTML = `<label>${key(section, option)}</label><input id="${fieldId(section, option)}">`;
         root.appendChild(wrap);
         document.getElementById(fieldId(section, option)).value = (values[section] || {})[option] || "";
     });
+    const timeValues = values.time || {};
+    document.getElementById("advanced-start-time").value = timeValues.start_time || "";
+    document.getElementById("advanced-end-time").value = timeValues.end_time || "";
+    syncSimpleSlotInputs(timeValues.start_time || "", timeValues.end_time || "");
+    updateSlotPreview();
 }
 
 async function loadConfig() {
@@ -148,6 +167,10 @@ function collectConfigValues() {
         values[section] = values[section] || {};
         values[section][option] = document.getElementById(fieldId(section, option)).value;
     });
+    values.time = {
+        start_time: document.getElementById("advanced-start-time").value,
+        end_time: document.getElementById("advanced-end-time").value
+    };
     const template = document.getElementById("venue-template").value;
     if (template) values.type.venue = template;
     return values;
@@ -182,13 +205,40 @@ function addMinutes(hhmm, minutes) {
     return `${String(Math.floor(total / 60)).padStart(2, "0")}${String(total % 60).padStart(2, "0")}`;
 }
 
+function minutesBetween(startHHMM, endHHMM) {
+    const start = Number(startHHMM.slice(0, 2)) * 60 + Number(startHHMM.slice(2, 4));
+    const end = Number(endHHMM.slice(0, 2)) * 60 + Number(endHHMM.slice(2, 4));
+    return end - start;
+}
+
+function syncSimpleSlotInputs(startTime, endTime) {
+    const singleStart = startTime && !startTime.includes("/") ? startTime : "";
+    const singleEnd = endTime && !endTime.includes("/") ? endTime : "";
+    if (!singleStart || !singleEnd || !singleStart.includes("-") || !singleEnd.includes("-")) return;
+    const [startDay, startHHMM] = singleStart.split("-", 2);
+    const [endDay, endHHMM] = singleEnd.split("-", 2);
+    if (startDay !== endDay || startHHMM.length !== 4 || endHHMM.length !== 4) return;
+    const durationMinutes = minutesBetween(startHHMM, endHHMM);
+    if (durationMinutes <= 0 || durationMinutes % 60 !== 0) return;
+    document.getElementById("slot-date").value = startDay;
+    document.getElementById("slot-start").value = startHHMM;
+    document.getElementById("slot-hours").value = String(durationMinutes / 60);
+}
+
+function updateSlotPreview() {
+    const start = document.getElementById("advanced-start-time").value || "-";
+    const end = document.getElementById("advanced-end-time").value || "-";
+    document.getElementById("slot-preview").textContent = `将写入配置：[time]\nstart_time = ${start}\nend_time = ${end}`;
+}
+
 function applySlotRange() {
     const day = document.getElementById("slot-date").value.trim();
     const start = document.getElementById("slot-start").value.trim();
     const hours = Number(document.getElementById("slot-hours").value || "1");
-    if (!day || !start || hours < 1) return;
-    document.getElementById(fieldId("time", "start_time")).value = `${day}-${start}`;
-    document.getElementById(fieldId("time", "end_time")).value = `${day}-${addMinutes(start, hours * 60)}`;
+    if (!day || !/^\d{4}$/.test(start) || hours < 1) return;
+    document.getElementById("advanced-start-time").value = `${day}-${start}`;
+    document.getElementById("advanced-end-time").value = `${day}-${addMinutes(start, hours * 60)}`;
+    updateSlotPreview();
 }
 
 async function runNow() {
@@ -274,6 +324,12 @@ loadConfig();
 loadTasks();
 refreshStatus();
 setInterval(refreshStatus, 15000);
+["slot-date", "slot-start", "slot-hours"].forEach(id => {
+    document.getElementById(id).addEventListener("input", applySlotRange);
+});
+["advanced-start-time", "advanced-end-time"].forEach(id => {
+    document.getElementById(id).addEventListener("input", updateSlotPreview);
+});
 </script>
 </body>
 </html>
