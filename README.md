@@ -2,6 +2,60 @@
 
 PKU 智慧场馆自动预约工具。当前分支基于原项目继续维护，重点是把验证码识别迁移到本地 GLM-OCR、适配新版智慧场馆页面，并提供本地 WebUI 与抢场调度器。
 
+## 当前仓库架构与文件用途
+
+状态标注：
+
+- 当前主流程：日常运行会直接用到。
+- 可选功能：配置开启或调试时才会用到。
+- 遗留未用：来自旧项目或旧入口，当前推荐流程不依赖。
+- 测试：只用于单元测试或集成测试。
+- 运行生成：本地运行产生，不应提交。
+
+```text
+PKUAutoBookingVenues/
+├── main.py                         # 当前主流程：预约入口，读取 config.ini，登录、选场、验证、提交订单
+├── page_func.py                    # 当前主流程：Selenium 页面操作，包含进场馆、选时段、提交订单
+├── booking_scheduler.py            # 当前主流程：按开放时间调度多个 config 任务，并发循环抢场
+├── ocr_server_transformers.py      # 当前主流程：本地 GLM-OCR FastAPI 服务，默认 8000 端口
+├── captcha_solver.py               # 当前主流程：验证码目标字提取、调用 OCR、点击坐标
+├── captcha_matcher.py              # 当前主流程：OCR 候选字与目标字匹配
+├── captcha_vision.py               # 当前主流程：验证码图像预处理、候选文字区域检测
+├── config.example.ini              # 当前主流程：配置模板，复制为 config.ini 后使用
+├── tasks.example.json              # 当前主流程：调度任务模板，复制为 tasks.json 后使用
+├── requirements.txt                # 当前主流程：Python 依赖列表
+├── web_dashboard/
+│   ├── app.py                      # 当前主流程：Flask WebUI 后端，默认 5000 端口
+│   ├── templates/index.html        # 当前主流程：WebUI 页面
+│   └── routes.py                   # 遗留未用：旧占位文件，当前路由都在 app.py
+├── scripts/
+│   ├── download_glm_ocr.py         # 当前主流程：下载 GLM-OCR 模型到 models/GLM-OCR
+│   ├── start_ocr_server.sh         # 当前主流程：启动 OCR 服务的便捷脚本
+│   ├── webui_launcher.py           # 可选功能：PyInstaller 打包 WebUI 时的启动入口
+│   └── build_webui.sh              # 可选功能：把 WebUI 打包成单文件启动器
+├── chaojiying.py                   # 可选功能：超级鹰兜底接口，仅 allow_chaojiying_fallback=true 时使用
+├── notice.py                       # 可选功能：Server 酱微信通知，仅 wechat_notice=true 时使用
+├── tests/                          # 测试：单元测试、OCR 调试脚本、验证码样本抓取脚本
+├── autoRun.bat                     # 遗留未用：旧 Windows 定时入口，当前推荐 booking_scheduler/WebUI
+├── macAutoRun.sh                   # 遗留未用：旧 macOS crontab 包装脚本，当前推荐 booking_scheduler/WebUI
+├── cron.py                         # 遗留未用：旧 crontab 管理脚本，当前 WebUI 不再调用
+├── env_check.py                    # 遗留未用：旧 config0.ini/config1.ini 批量检测逻辑，当前 CLI 使用 --config
+├── README.md                       # 文档
+└── LICENSE                         # Apache-2.0 许可证
+```
+
+常见本地运行生成文件：
+
+```text
+config.ini                          # 运行生成：你的真实配置，已被 .gitignore 忽略
+tasks.json                          # 运行生成：WebUI/调度器保存的真实任务，已忽略
+status.json                         # 运行生成：main.py 最近一次运行状态，已忽略
+scheduler_status.json               # 运行生成：调度器最近状态，已忽略
+*.log                               # 运行生成：预约日志，已忽略
+models/                             # 运行生成：OCR 模型和验证码失败样本，已忽略
+.scheduler.pid                      # 运行生成：WebUI 启动调度器时记录的进程号，已忽略
+```
+
 ## 相对原仓库的主要改动
 
 - `config0.ini` 示例已改为 `config.example.ini`；实际使用时复制为 `config.ini`。`config.ini` 默认被 `.gitignore` 忽略。
