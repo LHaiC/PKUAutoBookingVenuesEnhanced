@@ -35,79 +35,72 @@ class BookingSchedulerTests(unittest.TestCase):
         self.assertEqual(release_datetime_for_token("6-1300", today), datetime.datetime(2026, 4, 22, 12, 0))
 
     def test_task_is_due_one_minute_before_release_time(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = os.path.join(tmpdir, "wusi.ini")
-            with open(config_path, "w", encoding="utf-8") as f:
-                f.write("[type]\nvenue=五四体育中心-羽毛球馆\nvenue_num=-1\n")
-                f.write("[time]\nstart_time=20260422-0650\nend_time=20260422-0750\n")
-            task = {"config": config_path}
+        task = {"config": "config.ini", "start_time": "20260422-0650", "end_time": "20260422-0750"}
 
-            self.assertFalse(task_due(task, datetime.datetime(2026, 4, 19, 11, 58, 59)))
-            self.assertTrue(task_due(task, datetime.datetime(2026, 4, 19, 11, 59, 0)))
+        self.assertFalse(task_due(task, datetime.datetime(2026, 4, 19, 11, 58, 59)))
+        self.assertTrue(task_due(task, datetime.datetime(2026, 4, 19, 11, 59, 0)))
 
-    def test_task_start_tokens_are_read_from_config_not_task_payload(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = os.path.join(tmpdir, "qdb.ini")
-            with open(config_path, "w", encoding="utf-8") as f:
-                f.write("[type]\nvenue=邱德拔体育馆-羽毛球场\nvenue_num=-1\n")
-                f.write("[time]\nstart_time=20260425-1300\nend_time=20260425-1500\n")
+    def test_task_start_tokens_are_read_from_task_payload(self):
+        self.assertEqual(
+            start_tokens_for_task({"config": "config.ini", "start_time": "20260422-0650"}),
+            ["20260422-0650"],
+        )
 
-            self.assertEqual(start_tokens_for_task({"config": config_path, "start_time": "20260422-0650"}), ["20260425-1300"])
-
-    def test_normalize_task_removes_legacy_start_time(self):
+    def test_normalize_task_keeps_booking_fields(self):
         task = normalize_task({
             "config": "configs/wusi.ini",
             "start_time": "20260422-0650",
+            "end_time": "20260422-0750",
             "venue": "五四体育中心-羽毛球馆",
             "booking_start_time": "20260425-1300",
             "release_at": "2026-04-22 12:00:00",
         })
 
-        self.assertNotIn("start_time", task)
-        self.assertNotIn("venue", task)
+        self.assertEqual(task["start_time"], "20260422-0650")
+        self.assertEqual(task["end_time"], "20260422-0750")
+        self.assertEqual(task["venue"], "五四体育中心-羽毛球馆")
         self.assertNotIn("booking_start_time", task)
         self.assertNotIn("release_at", task)
 
-    def test_describe_task_includes_booking_details_from_config(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = os.path.join(tmpdir, "wusi.ini")
-            with open(config_path, "w", encoding="utf-8") as f:
-                f.write("[type]\nvenue=五四体育中心-羽毛球馆\nvenue_num=-1\n")
-                f.write("[time]\nstart_time=20260425-1300\nend_time=20260425-1500\n")
+    def test_describe_task_includes_booking_details_from_task(self):
+        described = describe_task(
+            {
+                "config": "config.ini",
+                "venue": "五四体育中心-羽毛球馆",
+                "venue_num": "-1",
+                "start_time": "20260425-1300",
+                "end_time": "20260425-1500",
+                "lead_seconds": 60,
+            },
+            today=datetime.date(2026, 4, 18),
+        )
 
-            described = describe_task({"config": config_path, "lead_seconds": 60}, today=datetime.date(2026, 4, 18))
-
-            self.assertEqual(described["venue"], "五四体育中心-羽毛球馆")
-            self.assertEqual(described["booking_start_time"], "20260425-1300")
-            self.assertEqual(described["booking_end_time"], "20260425-1500")
-            self.assertEqual(described["release_at"], "2026-04-22 12:00:00")
-            self.assertEqual(described["booking_action_at"], "2026-04-22 12:00:00")
-            self.assertEqual(described["run_after"], "2026-04-22 11:59:00")
+        self.assertEqual(described["venue"], "五四体育中心-羽毛球馆")
+        self.assertEqual(described["booking_start_time"], "20260425-1300")
+        self.assertEqual(described["booking_end_time"], "20260425-1500")
+        self.assertEqual(described["release_at"], "2026-04-22 12:00:00")
+        self.assertEqual(described["booking_action_at"], "2026-04-22 12:00:00")
+        self.assertEqual(described["run_after"], "2026-04-22 11:59:00")
 
     def test_main_command_uses_config_and_once_flag(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = os.path.join(tmpdir, "wusi.ini")
-            with open(config_path, "w", encoding="utf-8") as f:
-                f.write("[type]\nvenue=五四体育中心-羽毛球馆\nvenue_num=-1\n")
-                f.write("[time]\nstart_time=20260425-1300\nend_time=20260425-1500\n")
+        command = build_main_command(
+            {
+                "config": "config.ini",
+                "browser": "firefox",
+                "venue": "五四体育中心-羽毛球馆",
+                "venue_num": "-1",
+                "start_time": "20260425-1300",
+                "end_time": "20260425-1500",
+            },
+            today=datetime.date(2026, 4, 18),
+        )
 
-            command = build_main_command({"config": config_path, "browser": "firefox"}, today=datetime.date(2026, 4, 18))
-
-            self.assertIn("--once", command)
-            self.assertIn("--wait-until", command)
-            self.assertEqual(
-                command[-8:],
-                [
-                    "main.py",
-                    "--config",
-                    config_path,
-                    "--browser",
-                    "firefox",
-                    "--once",
-                    "--wait-until",
-                    "2026-04-22 12:00:00",
-                ],
-            )
+        self.assertIn("--once", command)
+        self.assertIn("--wait-until", command)
+        self.assertIn("--venue", command)
+        self.assertIn("五四体育中心-羽毛球馆", command)
+        self.assertIn("--start-time", command)
+        self.assertIn("20260425-1300", command)
 
 
 if __name__ == "__main__":

@@ -42,6 +42,10 @@ def normalize_task(task):
             "config",
             "browser",
             "enabled",
+            "venue",
+            "venue_num",
+            "start_time",
+            "end_time",
             "lead_seconds",
             "interval_seconds",
             "max_attempts",
@@ -54,6 +58,10 @@ def normalize_task(task):
     normalized.setdefault("config", "config.ini")
     normalized.setdefault("browser", "firefox")
     normalized.setdefault("enabled", True)
+    normalized.setdefault("venue", "")
+    normalized.setdefault("venue_num", "-1")
+    normalized.setdefault("start_time", "")
+    normalized.setdefault("end_time", "")
     normalized.setdefault("lead_seconds", 60)
     normalized.setdefault("interval_seconds", 5)
     normalized.setdefault("max_attempts", 120)
@@ -102,8 +110,11 @@ def release_datetime_for_token(token, today=None):
 
 
 def start_tokens_for_task(task):
-    booking_config = read_booking_config(task_config_path(task))
-    start_time = booking_config["start_time"]
+    task = normalize_task(task)
+    start_time = task.get("start_time", "").strip()
+    if not start_time:
+        booking_config = read_booking_config(task_config_path(task))
+        start_time = booking_config["start_time"]
     return [token.strip() for token in start_time.split("/") if token.strip()]
 
 
@@ -127,7 +138,7 @@ def task_due(task, now=None):
 def build_main_command(task, today=None):
     task = normalize_task(task)
     release_at = earliest_release_datetime(task, today)
-    return [
+    command = [
         sys.executable,
         "main.py",
         "--config",
@@ -138,16 +149,28 @@ def build_main_command(task, today=None):
         "--wait-until",
         str(release_at),
     ]
+    if task.get("venue"):
+        command.extend(["--venue", task["venue"]])
+    if task.get("venue_num") not in (None, ""):
+        command.extend(["--venue-num", str(task["venue_num"])])
+    if task.get("start_time"):
+        command.extend(["--start-time", task["start_time"]])
+    if task.get("end_time"):
+        command.extend(["--end-time", task["end_time"]])
+    return command
 
 
 def describe_task(task, today=None):
     described = normalize_task(task)
     try:
-        booking_config = read_booking_config(task_config_path(described))
-        described["venue"] = booking_config["venue"]
-        described["venue_num"] = booking_config["venue_num"]
-        described["booking_start_time"] = booking_config["start_time"]
-        described["booking_end_time"] = booking_config["end_time"]
+        if not described.get("venue") or not described.get("start_time") or not described.get("end_time"):
+            booking_config = read_booking_config(task_config_path(described))
+            described["venue"] = described.get("venue") or booking_config["venue"]
+            described["venue_num"] = described.get("venue_num") or booking_config["venue_num"]
+            described["start_time"] = described.get("start_time") or booking_config["start_time"]
+            described["end_time"] = described.get("end_time") or booking_config["end_time"]
+        described["booking_start_time"] = described["start_time"]
+        described["booking_end_time"] = described["end_time"]
         release_at = earliest_release_datetime(described, today)
         run_after = release_at - dt.timedelta(seconds=int(described.get("lead_seconds", 60)))
         described["release_at"] = str(release_at)

@@ -13,6 +13,8 @@ class WebUiTemplateTests(unittest.TestCase):
 
         fields_array = template.split("const fields = [", 1)[1].split("];", 1)[0]
 
+        self.assertNotIn('["type", "venue"]', fields_array)
+        self.assertNotIn('["type", "venue_num"]', fields_array)
         self.assertNotIn('["time", "start_time"]', fields_array)
         self.assertNotIn('["time", "end_time"]', fields_array)
         self.assertIn('id="advanced-start-time"', template)

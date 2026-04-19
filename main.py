@@ -110,10 +110,10 @@ def load_config(config):
 
     user_name = conf['login']['user_name']
     password = conf['login']['password']
-    venue = conf['type']['venue']
-    venue_num = int(conf['type']['venue_num'])
-    start_time = conf['time']['start_time']
-    end_time = conf['time']['end_time']
+    venue = conf.get('type', 'venue', fallback='')
+    venue_num = conf.getint('type', 'venue_num', fallback=-1)
+    start_time = conf.get('time', 'start_time', fallback='')
+    end_time = conf.get('time', 'end_time', fallback='')
     wechat_notice = conf.getboolean('wechat', 'wechat_notice')
     sckey = conf['wechat']['SCKEY']
     username = conf['chaojiying']['username']
@@ -172,12 +172,26 @@ def wait_until_datetime(wait_until):
     print("到达预约开放时间，开始进入预约页面")
 
 
-def page(config, browser="chrome", wait_until=None):
+def page(
+    config,
+    browser="chrome",
+    wait_until=None,
+    venue_override=None,
+    venue_num_override=None,
+    start_time_override=None,
+    end_time_override=None,
+):
     (
         user_name, password, venue, venue_num, start_time, end_time, wechat_notice,
         sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout,
         allow_chaojiying_fallback,
     ) = load_config(config)
+    venue = venue_override or venue
+    venue_num = int(venue_num_override) if venue_num_override not in (None, "") else venue_num
+    start_time = start_time_override or start_time
+    end_time = end_time_override or end_time
+    if not venue or not start_time or not end_time:
+        raise ValueError("缺少预约任务信息：需要 venue、start_time、end_time")
 
     log_str = ""
     status = True
@@ -309,6 +323,10 @@ def run_cli():
     parser.add_argument("--retries", type=int, default=3, help="stop after first success")
     parser.add_argument("--once", action="store_true", help="run one attempt only")
     parser.add_argument("--wait-until", default=None, help="wait until this local datetime after login before entering venue")
+    parser.add_argument("--venue", default=None, help="booking venue, overrides config [type] venue")
+    parser.add_argument("--venue-num", default=None, help="venue number, overrides config [type] venue_num")
+    parser.add_argument("--start-time", default=None, help="booking start_time, overrides config [time] start_time")
+    parser.add_argument("--end-time", default=None, help="booking end_time, overrides config [time] end_time")
     args = parser.parse_args()
 
     # lst_conf = env_check()
@@ -318,7 +336,15 @@ def run_cli():
     retries = 1 if args.once else args.retries
     success = False
     for _ in range(retries):
-        status_main = page(args.config, args.browser, wait_until=args.wait_until)
+        status_main = page(
+            args.config,
+            args.browser,
+            wait_until=args.wait_until,
+            venue_override=args.venue,
+            venue_num_override=args.venue_num,
+            start_time_override=args.start_time,
+            end_time_override=args.end_time,
+        )
         if status_main:
             success = True
             break

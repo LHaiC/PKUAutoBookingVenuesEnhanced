@@ -121,6 +121,67 @@ class MainFlowTests(unittest.TestCase):
             main.time.sleep = original_sleep
             main.sleep = original_imported_sleep
 
+    def test_page_uses_task_overrides_when_config_has_no_booking_fields(self):
+        calls = []
+
+        def fake_load_config(_config):
+            return (
+                "user",
+                "password",
+                "",
+                -1,
+                "",
+                "",
+                False,
+                "",
+                "",
+                "",
+                "",
+                True,
+                "http://localhost:8000",
+                10,
+                False,
+            )
+
+        class FakeDriver:
+            def quit(self):
+                calls.append("quit")
+
+        patches = {
+            "load_config": fake_load_config,
+            "judge_exceeds_days_limit": lambda start, end: ([start], [end], [1], ""),
+            "build_driver": lambda _browser, headless=True: FakeDriver(),
+            "login": lambda *_args, **_kwargs: calls.append("login") or "login\n",
+            "go_to_venue": lambda _driver, venue: calls.append(("venue", venue)) or (False, "venue\n"),
+            "log_status": lambda *_args, **_kwargs: calls.append("log"),
+        }
+        originals = {name: getattr(main, name) for name in patches}
+        original_sleep = main.time.sleep
+        original_imported_sleep = main.sleep
+        try:
+            for name, value in patches.items():
+                setattr(main, name, value)
+            main.time.sleep = lambda _seconds: None
+            main.sleep = lambda _seconds: None
+
+            self.assertFalse(
+                main.page(
+                    "config.ini",
+                    "firefox",
+                    venue_override="五四体育中心-羽毛球馆",
+                    venue_num_override="-1",
+                    start_time_override="3-0800",
+                    end_time_override="3-0900",
+                )
+            )
+
+            self.assertIn(("venue", "五四体育中心-羽毛球馆"), calls)
+        finally:
+            for name, value in originals.items():
+                setattr(main, name, value)
+            main.time.sleep = original_sleep
+            main.sleep = original_imported_sleep
+
 
 if __name__ == "__main__":
     unittest.main()

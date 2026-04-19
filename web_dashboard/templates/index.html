@@ -39,10 +39,10 @@
         </div>
         <div id="config-list-feedback" class="status"></div>
         <table>
-            <thead><tr><th>配置</th><th>场馆</th><th>预约时间</th><th>操作</th></tr></thead>
+            <thead><tr><th>配置</th><th>状态</th><th>操作</th></tr></thead>
             <tbody id="configs-body"></tbody>
         </table>
-        <p class="small">这里列出 config.ini、config_*.ini 和 configs/*.ini。点“加载”会进入编辑区，点“添加为任务”会保存到任务列表。</p>
+        <p class="small">这里列出 config.ini、config_*.ini 和 configs/*.ini。config 只保存账号、通知和 OCR 设置；场馆和时间保存在任务里。</p>
     </section>
 
     <section>
@@ -53,20 +53,35 @@
                 <input id="config-path" value="config.ini">
             </div>
             <div>
+                <label>说明</label>
+                <input value="不保存场馆和时间" disabled>
+            </div>
+        </div>
+        <div id="config-fields" class="grid"></div>
+        <div class="actions">
+            <button onclick="loadConfig()">读取配置</button>
+            <button onclick="saveConfig()">保存配置</button>
+        </div>
+        <p class="small">保存配置会移除旧的 [type] 和 [time]，避免 config.ini 与 tasks.json 重复保存预约信息。</p>
+    </section>
+
+    <section>
+        <h2>预约任务</h2>
+        <div class="grid">
+            <div><label>任务名</label><input id="task-name" placeholder="wusi-0422-morning"></div>
+            <div><label>任务配置</label><input id="task-config" value="config.ini"></div>
+            <div>
                 <label>浏览器</label>
                 <select id="browser"><option value="firefox">firefox</option><option value="chrome">chrome</option></select>
             </div>
             <div>
-                <label>快速模板</label>
+                <label>场馆</label>
                 <select id="venue-template">
-                    <option value="">不覆盖</option>
                     <option value="五四体育中心-羽毛球馆">五四体育中心-羽毛球馆</option>
                     <option value="邱德拔体育馆-羽毛球场">邱德拔体育馆-羽毛球场</option>
                 </select>
             </div>
-        </div>
-        <div id="config-fields" class="grid"></div>
-        <div class="grid">
+            <div><label>场地编号</label><input id="venue-num" value="-1"></div>
             <div>
                 <label>日期或星期</label>
                 <input id="slot-date" placeholder="20260422 或 3">
@@ -79,46 +94,32 @@
                 <label>至少几小时</label>
                 <input id="slot-hours" type="number" min="1" step="1" value="1">
             </div>
+            <div><label>最大尝试次数</label><input id="task-attempts" type="number" value="120"></div>
+            <div><label>间隔秒数</label><input id="task-interval" type="number" value="5"></div>
+            <div><label>登录预热秒数</label><input id="task-lead" type="number" value="60"></div>
         </div>
         <div id="slot-preview" class="status"></div>
         <details>
             <summary>高级时间配置</summary>
-            <p class="small">需要多个候选时段时，在这里直接编辑 config 的原始 time.start_time/time.end_time；普通表单会同步写入这里。</p>
+            <p class="small">需要多个候选时段时，在这里直接编辑任务的 start_time/end_time；普通表单会同步写入这里。</p>
             <div class="grid">
                 <div class="wide">
-                    <label>time.start_time</label>
+                    <label>task.start_time</label>
                     <input id="advanced-start-time" placeholder="20260422-1300 或 6-1300/6-1400">
                 </div>
                 <div class="wide">
-                    <label>time.end_time</label>
+                    <label>task.end_time</label>
                     <input id="advanced-end-time" placeholder="20260422-1500 或 6-1400/6-1500">
                 </div>
             </div>
         </details>
         <div class="actions">
-            <button onclick="loadConfig()">读取配置</button>
             <button onclick="applySlotRange()" class="secondary">生成连续时段</button>
-            <button onclick="saveConfig()">保存配置</button>
-            <button onclick="saveConfigAndAddTask()" class="secondary">保存配置并添加任务</button>
-            <button onclick="runNow()">立即运行一次</button>
-        </div>
-        <p class="small">预约内容只写在配置文件里。连续时段会写成 start_time/end_time，例如 20260422-1300 到 20260422-1500。多个候选时段仍可用斜杠分隔。</p>
-    </section>
-
-    <section>
-        <h2>预约任务</h2>
-        <div class="grid">
-            <div><label>任务名</label><input id="task-name" placeholder="wusi-0422-morning"></div>
-            <div><label>任务配置</label><input id="task-config" value="config.ini"></div>
-            <div><label>最大尝试次数</label><input id="task-attempts" type="number" value="120"></div>
-            <div><label>间隔秒数</label><input id="task-interval" type="number" value="5"></div>
-            <div><label>登录预热秒数</label><input id="task-lead" type="number" value="60"></div>
-        </div>
-        <div class="actions">
             <button onclick="addTask()">添加任务</button>
             <button onclick="saveTasks()">保存任务</button>
             <button onclick="startScheduler()">启动调度器</button>
             <button onclick="stopScheduler()" class="danger">停止调度器</button>
+            <button onclick="runNow()">立即运行一次</button>
         </div>
         <div id="task-feedback" class="status"></div>
         <div id="scheduler-summary" class="status"></div>
@@ -126,7 +127,7 @@
             <thead><tr><th>启用</th><th>任务</th><th>配置</th><th>场馆</th><th>预约时间</th><th>开抢时间</th><th>预热启动</th><th>重试</th><th>操作</th></tr></thead>
             <tbody id="tasks-body"></tbody>
         </table>
-        <p class="small">任务只指向配置文件。场馆和预约时间从对应 config 解析，避免 tasks.json 和 config.ini 重复写时间。</p>
+        <p class="small">任务选择一个 config 作为账号/OCR 配置；场馆和预约时间保存在任务自身。</p>
     </section>
 
     <section>
@@ -142,7 +143,7 @@
 
 <script>
 const fields = [
-    ["login", "user_name"], ["login", "password"], ["type", "venue"], ["type", "venue_num"],
+    ["login", "user_name"], ["login", "password"],
     ["wechat", "wechat_notice"], ["wechat", "SCKEY"],
     ["chaojiying", "username"], ["chaojiying", "password"], ["chaojiying", "soft_id"],
     ["glm_ocr", "enabled"], ["glm_ocr", "endpoint"], ["glm_ocr", "timeout"], ["glm_ocr", "allow_chaojiying_fallback"]
@@ -184,16 +185,13 @@ function renderConfigList(configs) {
     body.innerHTML = "";
     configs.forEach(config => {
         const tr = document.createElement("tr");
-        const bookingTime = config.start_time || config.end_time
-            ? `${config.start_time || "?"} -> ${config.end_time || "?"}`
-            : (config.error || "未设置时间");
+        const status = config.error || (config.legacy_booking ? "含旧预约字段，保存后会移除" : "账号/OCR 配置");
         tr.innerHTML = `
             <td>${escapeHtml(config.path)}</td>
-            <td>${escapeHtml(config.venue || "-")}</td>
-            <td>${escapeHtml(bookingTime)}</td>
+            <td>${escapeHtml(status)}</td>
             <td>
                 <button onclick="loadListedConfig('${escapeHtml(config.path)}')">加载</button>
-                <button class="secondary" onclick="addTaskForConfig('${escapeHtml(config.path)}', '${escapeHtml(config.venue)}', '${escapeHtml(config.start_time)}')">添加为任务</button>
+                <button class="secondary" onclick="addTaskForConfig('${escapeHtml(config.path)}')">添加为任务</button>
             </td>`;
         body.appendChild(tr);
     });
@@ -205,9 +203,11 @@ async function loadListedConfig(path) {
     setMessage("config-list-feedback", `已加载 ${path}`);
 }
 
-async function addTaskForConfig(path, venue, startTime) {
+async function addTaskForConfig(path) {
     document.getElementById("task-config").value = path;
-    document.getElementById("task-name").value = `${venue || path} ${startTime || ""}`.trim();
+    if (!document.getElementById("task-name").value) {
+        document.getElementById("task-name").value = path;
+    }
     addTask();
     await saveTasks(`已添加并保存任务：${path}`);
 }
@@ -221,10 +221,6 @@ function renderFields(values) {
         root.appendChild(wrap);
         document.getElementById(fieldId(section, option)).value = (values[section] || {})[option] || "";
     });
-    const timeValues = values.time || {};
-    document.getElementById("advanced-start-time").value = timeValues.start_time || "";
-    document.getElementById("advanced-end-time").value = timeValues.end_time || "";
-    syncSimpleSlotInputs(timeValues.start_time || "", timeValues.end_time || "");
     updateSlotPreview();
 }
 
@@ -242,12 +238,6 @@ function collectConfigValues() {
         values[section] = values[section] || {};
         values[section][option] = document.getElementById(fieldId(section, option)).value;
     });
-    values.time = {
-        start_time: document.getElementById("advanced-start-time").value,
-        end_time: document.getElementById("advanced-end-time").value
-    };
-    const template = document.getElementById("venue-template").value;
-    if (template) values.type.venue = template;
     return values;
 }
 
@@ -259,18 +249,6 @@ async function saveConfig() {
     document.getElementById("status").textContent = `已保存 ${data.path}`;
     await loadConfigList();
     return data;
-}
-
-async function saveConfigAndAddTask() {
-    const data = await saveConfig();
-    const venue = (data.values.type || {}).venue || "";
-    const start = (data.values.time || {}).start_time || "";
-    document.getElementById("task-config").value = data.path;
-    if (!document.getElementById("task-name").value) {
-        document.getElementById("task-name").value = `${venue} ${start}`.trim() || data.path;
-    }
-    addTask();
-    await saveTasks();
 }
 
 function addMinutes(hhmm, minutes) {
@@ -303,7 +281,7 @@ function syncSimpleSlotInputs(startTime, endTime) {
 function updateSlotPreview() {
     const start = document.getElementById("advanced-start-time").value || "-";
     const end = document.getElementById("advanced-end-time").value || "-";
-    document.getElementById("slot-preview").textContent = `将写入配置：[time]\nstart_time = ${start}\nend_time = ${end}`;
+    document.getElementById("slot-preview").textContent = `将写入任务：\nstart_time = ${start}\nend_time = ${end}`;
 }
 
 function applySlotRange() {
@@ -317,10 +295,25 @@ function applySlotRange() {
 }
 
 async function runNow() {
-    const payload = {config: document.getElementById("config-path").value || "config.ini", browser: document.getElementById("browser").value};
+    const payload = collectTaskPayload();
     document.getElementById("status").textContent = "运行中";
     const data = await fetchJson("/api/run", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
     document.getElementById("status").textContent = `returncode=${data.returncode}\n${data.stdout}\n${data.stderr}`;
+}
+
+function collectTaskPayload() {
+    return {
+        name: document.getElementById("task-name").value || document.getElementById("task-config").value,
+        config: document.getElementById("task-config").value || "config.ini",
+        browser: document.getElementById("browser").value,
+        venue: document.getElementById("venue-template").value,
+        venue_num: document.getElementById("venue-num").value || "-1",
+        start_time: document.getElementById("advanced-start-time").value,
+        end_time: document.getElementById("advanced-end-time").value,
+        max_attempts: Number(document.getElementById("task-attempts").value || 120),
+        interval_seconds: Number(document.getElementById("task-interval").value || 5),
+        lead_seconds: Number(document.getElementById("task-lead").value || 60)
+    };
 }
 
 function renderTasks() {
@@ -346,14 +339,10 @@ function renderTasks() {
 }
 
 function addTask() {
+    const payload = collectTaskPayload();
     tasks.push({
         id: window.crypto && crypto.randomUUID ? crypto.randomUUID().slice(0, 12) : String(Date.now()),
-        name: document.getElementById("task-name").value || document.getElementById("task-config").value,
-        config: document.getElementById("task-config").value || "config.ini",
-        browser: document.getElementById("browser").value,
-        max_attempts: Number(document.getElementById("task-attempts").value || 120),
-        interval_seconds: Number(document.getElementById("task-interval").value || 5),
-        lead_seconds: Number(document.getElementById("task-lead").value || 60),
+        ...payload,
         enabled: true
     });
     renderTasks();

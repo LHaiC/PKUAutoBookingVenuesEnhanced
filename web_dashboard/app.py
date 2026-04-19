@@ -34,10 +34,6 @@ SCHEDULER_PID_FILE = ROOT_DIR / ".scheduler.pid"
 CONFIG_FIELDS = [
     ("login", "user_name"),
     ("login", "password"),
-    ("type", "venue"),
-    ("type", "venue_num"),
-    ("time", "start_time"),
-    ("time", "end_time"),
     ("wechat", "wechat_notice"),
     ("wechat", "SCKEY"),
     ("chaojiying", "username"),
@@ -83,7 +79,11 @@ def write_config(path_value, values):
     path = ensure_config(path_value)
     conf = configparser.ConfigParser()
     conf.read(path, encoding="utf8")
+    for legacy_section in ("type", "time"):
+        conf.remove_section(legacy_section)
     for section, options in values.items():
+        if section in ("type", "time"):
+            continue
         if not conf.has_section(section):
             conf.add_section(section)
         for option, value in options.items():
@@ -106,10 +106,7 @@ def config_summary(path):
     conf.read(path, encoding="utf8")
     return {
         "path": str(path.relative_to(ROOT_DIR)),
-        "venue": conf.get("type", "venue", fallback=""),
-        "venue_num": conf.get("type", "venue_num", fallback="-1"),
-        "start_time": conf.get("time", "start_time", fallback=""),
-        "end_time": conf.get("time", "end_time", fallback=""),
+        "legacy_booking": conf.has_section("type") or conf.has_section("time"),
     }
 
 
@@ -127,10 +124,7 @@ def list_config_files():
         except Exception as exc:
             summary = {
                 "path": str(path.relative_to(ROOT_DIR)),
-                "venue": "",
-                "venue_num": "",
-                "start_time": "",
-                "end_time": "",
+                "legacy_booking": False,
                 "error": str(exc),
             }
         configs.append(summary)
@@ -213,8 +207,17 @@ def run_booking_api():
     payload = request.get_json(force=True)
     config_path = payload.get("config", "config.ini")
     browser = payload.get("browser", "firefox")
+    command = [sys.executable, "main.py", "--config", config_path, "--browser", browser, "--once"]
+    for payload_key, cli_key in (
+        ("venue", "--venue"),
+        ("venue_num", "--venue-num"),
+        ("start_time", "--start-time"),
+        ("end_time", "--end-time"),
+    ):
+        if payload.get(payload_key) not in (None, ""):
+            command.extend([cli_key, str(payload[payload_key])])
     result = subprocess.run(
-        [sys.executable, "main.py", "--config", config_path, "--browser", browser, "--once"],
+        command,
         cwd=ROOT_DIR,
         capture_output=True,
         text=True,
