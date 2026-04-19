@@ -171,6 +171,24 @@ def prepare_recognition_image_bytes(
     return buf.getvalue()
 
 
+def image_to_png_bytes(image: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def crop_box_image(image: Image.Image, box: list[int], padding: int = 10) -> Image.Image:
+    x1, y1, x2, y2 = box
+    return image.crop(
+        (
+            max(0, x1 - padding),
+            max(0, y1 - padding),
+            min(image.width, x2 + padding),
+            min(image.height, y2 + padding),
+        )
+    )
+
+
 def candidates_from_output(
     image: Image.Image,
     output: str,
@@ -193,6 +211,17 @@ def candidates_from_output(
             item["bbox"] = refine_bbox_to_dark_pixels(image, [int(v) for v in bbox])
         refined_items.append(item)
     return normalize_candidates(refined_items)
+
+
+def expand_confusable_target_candidates(candidates: list[Candidate], targets: list[str]) -> list[Candidate]:
+    if "三" not in targets or "川" in targets:
+        return candidates
+
+    expanded = list(candidates)
+    for candidate in candidates:
+        if candidate.text == "川":
+            expanded.append(Candidate(text="三", bbox=list(candidate.bbox), confidence=0.50))
+    return expanded
 
 
 def _candidate_from_box(text: str, image: Image.Image, box: list[int], confidence: float = 0.50) -> Candidate:
@@ -267,6 +296,39 @@ def infer_single_missing_target_candidates(
 
     candidates.append(_candidate_from_box(missing_target, image, boxes[left_box]))
     candidates.extend(reversed(suffix))
+    return candidates
+
+
+def recognize_rotated_box_candidates(
+    image: Image.Image,
+    targets: list[str],
+    boxes: list[list[int]],
+    angles: tuple[int, ...] = (0, 90, 180, 270),
+) -> list[Candidate]:
+    if not targets:
+        return []
+
+    target_set = set(targets)
+    candidates = []
+    for box in boxes:
+        crop = crop_box_image(image, box)
+        hits = set()
+        raw_outputs = []
+        for angle in angles:
+            rotated = crop.rotate(angle, expand=True, fillcolor="white")
+            output = engine.recognize(image_to_png_bytes(rotated), None)
+            raw_outputs.append(output)
+            for item in parse_model_output(output):
+                text = str(item.get("text", "")).strip()
+                if text in target_set:
+                    hits.add(text)
+        if len(hits) == 1:
+            candidates.append(_candidate_from_box(next(iter(hits)), image, box))
+            continue
+        if "三" in target_set and "川" not in target_set:
+            raw_text = "\n".join(raw_outputs)
+            if "111" in raw_text:
+                candidates.append(_candidate_from_box("三", image, box))
     return candidates
 
 
@@ -380,6 +442,7 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
     if targets:
         original_output = engine.recognize(image_bytes, None)
         original_candidates = candidates_from_output(image, original_output, boxes)
+        original_candidates = expand_confusable_target_candidates(original_candidates, targets)
         try:
             results = match_targets(targets, original_candidates, size)
             raw_output = original_output
@@ -387,6 +450,7 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
             recognition_bytes = prepare_recognition_image_bytes(image, use_strip=True, boxes=boxes)
             strip_output = engine.recognize(recognition_bytes, None)
             strip_candidates = candidates_from_output(image, strip_output, boxes)
+            strip_candidates = expand_confusable_target_candidates(strip_candidates, targets)
             raw_outputs = [original_output, strip_output]
             try:
                 results = match_targets_from_views(
@@ -410,15 +474,24 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
                     results = inferred_results
                     raw_output = "\n".join(raw_outputs)
                 else:
-                    return {
-                        "results": [],
-                        "error": "unsafe_ocr_output",
-                        "detail": str(fallback_exc),
-                        "image_size": list(size),
-                        "method": "glm_ocr_transformers_with_local_positioning",
-                        "raw_output": original_output,
-                        "raw_outputs": raw_outputs,
-                    }
+                    rotated_candidates = recognize_rotated_box_candidates(image, targets, boxes)
+                    try:
+                        results = match_targets_from_views(
+                            targets,
+                            [original_candidates, strip_candidates, rotated_candidates],
+                            size,
+                        )
+                        raw_output = "\n".join(raw_outputs)
+                    except MatchError:
+                        return {
+                            "results": [],
+                            "error": "unsafe_ocr_output",
+                            "detail": str(fallback_exc),
+                            "image_size": list(size),
+                            "method": "glm_ocr_transformers_with_local_positioning",
+                            "raw_output": original_output,
+                            "raw_outputs": raw_outputs,
+                        }
     else:
         raw_output = engine.recognize(image_bytes, None)
         results = attach_colored_text_bboxes(image, parse_model_output(raw_output))

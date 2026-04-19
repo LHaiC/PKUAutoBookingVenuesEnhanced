@@ -219,8 +219,8 @@ def detect_colored_text_bboxes(
 def filter_captcha_text_bboxes(
     boxes: list[list[int]],
     image_size: tuple[int, int] | None = None,
-    min_width: int = 24,
-    min_height: int = 24,
+    min_width: int = 16,
+    min_height: int = 16,
 ) -> list[list[int]]:
     max_bottom = None
     if image_size is not None:

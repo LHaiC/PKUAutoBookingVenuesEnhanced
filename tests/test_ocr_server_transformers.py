@@ -394,6 +394,77 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(response["results"][1]["x"], 224)
         self.assertEqual(response["results"][2]["x"], 119)
 
+    def test_parse_route_uses_target_aware_confusable_candidates(self):
+        recording_engine = FakeRecordingEngine(["卡拉川怎\n\n场馆预约", "卡拉川怎"])
+        ocr_server_transformers.engine = recording_engine
+        image = Image.new("RGB", (310, 155), (77, 193, 228))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([18, 9, 50, 40], fill=(25, 120, 180))
+        draw.rectangle([92, 50, 128, 88], fill=(25, 120, 180))
+        draw.rectangle([145, 66, 180, 102], fill=(25, 120, 180))
+        draw.rectangle([218, 18, 254, 54], fill=(25, 120, 180))
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        response = parse(
+            ParseRequest(
+                images=[f"data:image/png;base64,{payload}"],
+                targets=["拉", "怎", "三"],
+            )
+        )
+
+        self.assertEqual([item["text"] for item in response["results"]], ["拉", "怎", "三"])
+        self.assertEqual(response["results"][0]["x"], 110)
+        self.assertEqual(response["results"][1]["x"], 236)
+        self.assertEqual(response["results"][2]["x"], 163)
+
+    def test_parse_route_uses_target_aware_confusable_candidate_for_de(self):
+        recording_engine = FakeRecordingEngine(
+            [
+                "处鼎都星\n\n场馆预约",
+                "处昂都星",
+                "处",
+                "",
+                "",
+                "",
+                "得",
+                "",
+                "",
+                "",
+                "都",
+                "",
+                "",
+                "",
+                "星",
+                "",
+                "",
+                "",
+            ]
+        )
+        ocr_server_transformers.engine = recording_engine
+        image = Image.new("RGB", (310, 155), (190, 225, 240))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([29, 57, 64, 96], fill=(20, 90, 120))
+        draw.rectangle([93, 75, 122, 113], fill=(240, 90, 20))
+        draw.rectangle([154, 56, 190, 91], fill=(20, 140, 220))
+        draw.rectangle([220, 42, 255, 78], fill=(20, 40, 100))
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        response = parse(
+            ParseRequest(
+                images=[f"data:image/png;base64,{payload}"],
+                targets=["处", "星", "得"],
+            )
+        )
+
+        self.assertEqual([item["text"] for item in response["results"]], ["处", "星", "得"])
+        self.assertEqual(response["results"][0]["x"], 47)
+        self.assertEqual(response["results"][1]["x"], 238)
+        self.assertEqual(response["results"][2]["x"], 108)
+
     def test_parse_route_fails_closed_for_plain_text_with_targets(self):
         ocr_server_transformers.engine = FakeEngine()
 
