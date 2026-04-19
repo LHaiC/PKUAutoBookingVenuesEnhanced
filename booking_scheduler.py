@@ -124,8 +124,9 @@ def task_due(task, now=None):
     return now >= start_at
 
 
-def build_main_command(task):
+def build_main_command(task, today=None):
     task = normalize_task(task)
+    release_at = earliest_release_datetime(task, today)
     return [
         sys.executable,
         "main.py",
@@ -134,6 +135,8 @@ def build_main_command(task):
         "--browser",
         task["browser"],
         "--once",
+        "--wait-until",
+        str(release_at),
     ]
 
 
@@ -148,6 +151,7 @@ def describe_task(task, today=None):
         release_at = earliest_release_datetime(described, today)
         run_after = release_at - dt.timedelta(seconds=int(described.get("lead_seconds", 60)))
         described["release_at"] = str(release_at)
+        described["booking_action_at"] = str(release_at)
         described["run_after"] = str(run_after)
         described["error"] = None
     except Exception as exc:
@@ -156,6 +160,7 @@ def describe_task(task, today=None):
         described["booking_start_time"] = ""
         described["booking_end_time"] = ""
         described["release_at"] = ""
+        described["booking_action_at"] = ""
         described["run_after"] = ""
         described["error"] = str(exc)
     return described

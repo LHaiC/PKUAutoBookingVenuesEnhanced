@@ -81,13 +81,33 @@ class BookingSchedulerTests(unittest.TestCase):
             self.assertEqual(described["booking_start_time"], "20260425-1300")
             self.assertEqual(described["booking_end_time"], "20260425-1500")
             self.assertEqual(described["release_at"], "2026-04-22 12:00:00")
+            self.assertEqual(described["booking_action_at"], "2026-04-22 12:00:00")
             self.assertEqual(described["run_after"], "2026-04-22 11:59:00")
 
     def test_main_command_uses_config_and_once_flag(self):
-        command = build_main_command({"config": "configs/wusi.ini", "browser": "firefox"})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, "wusi.ini")
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write("[type]\nvenue=五四体育中心-羽毛球馆\nvenue_num=-1\n")
+                f.write("[time]\nstart_time=20260425-1300\nend_time=20260425-1500\n")
 
-        self.assertEqual(command[-6:], ["main.py", "--config", "configs/wusi.ini", "--browser", "firefox", "--once"])
-        self.assertIn("--once", command)
+            command = build_main_command({"config": config_path, "browser": "firefox"}, today=datetime.date(2026, 4, 18))
+
+            self.assertIn("--once", command)
+            self.assertIn("--wait-until", command)
+            self.assertEqual(
+                command[-8:],
+                [
+                    "main.py",
+                    "--config",
+                    config_path,
+                    "--browser",
+                    "firefox",
+                    "--once",
+                    "--wait-until",
+                    "2026-04-22 12:00:00",
+                ],
+            )
 
 
 if __name__ == "__main__":

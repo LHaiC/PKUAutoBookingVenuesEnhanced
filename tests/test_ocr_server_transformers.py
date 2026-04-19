@@ -369,6 +369,31 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(response["results"][1]["x"], 110)
         self.assertEqual(response["results"][2]["x"], 163)
 
+    def test_parse_route_infers_single_missing_target_from_remaining_box(self):
+        recording_engine = FakeRecordingEngine(["讲高沙\n\n场馆预约", "讲高沙"])
+        ocr_server_transformers.engine = recording_engine
+        image = Image.new("RGB", (310, 155), (117, 164, 206))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle([8, 71, 44, 107], fill=(85, 30, 165))
+        draw.rectangle([102, 51, 136, 89], fill=(240, 90, 20))
+        draw.rectangle([155, 51, 189, 85], fill=(25, 60, 140))
+        draw.rectangle([207, 84, 240, 116], fill=(170, 45, 160))
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        response = parse(
+            ParseRequest(
+                images=[f"data:image/png;base64,{payload}"],
+                targets=["讲", "沙", "领"],
+            )
+        )
+
+        self.assertEqual([item["text"] for item in response["results"]], ["讲", "沙", "领"])
+        self.assertEqual(response["results"][0]["x"], 26)
+        self.assertEqual(response["results"][1]["x"], 224)
+        self.assertEqual(response["results"][2]["x"], 119)
+
     def test_parse_route_fails_closed_for_plain_text_with_targets(self):
         ocr_server_transformers.engine = FakeEngine()
 

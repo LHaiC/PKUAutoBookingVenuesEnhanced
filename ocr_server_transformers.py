@@ -7,6 +7,7 @@ import math
 import os
 import re
 import tempfile
+from collections import Counter
 from contextlib import contextmanager
 
 from PIL import Image, UnidentifiedImageError
@@ -16,7 +17,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from captcha_matcher import MatchError, match_targets, normalize_candidates
+from captcha_matcher import Candidate, MatchError, match_targets, normalize_candidates
 from captcha_vision import (
     build_colored_text_strip,
     decode_image,
@@ -194,6 +195,81 @@ def candidates_from_output(
     return normalize_candidates(refined_items)
 
 
+def _candidate_from_box(text: str, image: Image.Image, box: list[int], confidence: float = 0.50) -> Candidate:
+    return Candidate(
+        text=text,
+        bbox=refine_bbox_to_dark_pixels(image, [int(value) for value in box]),
+        confidence=confidence,
+    )
+
+
+def infer_single_missing_target_candidates(
+    image: Image.Image,
+    targets: list[str],
+    output: str,
+    boxes: list[list[int]],
+) -> list[Candidate]:
+    if not targets or len(set(targets)) != len(targets):
+        return []
+
+    parsed = parse_model_output(output)
+    chars = [
+        str(item.get("text", "")).strip()
+        for item in parsed
+        if len(str(item.get("text", "")).strip()) == 1
+    ]
+    if len(boxes) != len(chars) + 1:
+        return []
+
+    target_counts = Counter(targets)
+    parsed_counts = Counter(chars)
+    missing_targets = [
+        target
+        for target in targets
+        if parsed_counts[target] < target_counts[target]
+    ]
+    if len(missing_targets) != 1:
+        return []
+    missing_target = missing_targets[0]
+
+    candidates: list[Candidate] = []
+    left_box = 0
+    right_box = len(boxes) - 1
+    left_char = 0
+    right_char = len(chars) - 1
+
+    while (
+        left_char <= right_char
+        and left_box <= right_box
+        and chars[left_char] in target_counts
+        and chars[left_char] != missing_target
+    ):
+        candidates.append(_candidate_from_box(chars[left_char], image, boxes[left_box]))
+        left_box += 1
+        left_char += 1
+
+    suffix: list[Candidate] = []
+    while (
+        right_char >= left_char
+        and right_box >= left_box
+        and chars[right_char] in target_counts
+        and chars[right_char] != missing_target
+    ):
+        suffix.append(_candidate_from_box(chars[right_char], image, boxes[right_box]))
+        right_box -= 1
+        right_char -= 1
+
+    middle_chars = chars[left_char : right_char + 1]
+    if any(char in target_counts for char in middle_chars):
+        return []
+    if right_box - left_box + 1 != len(middle_chars) + 1:
+        return []
+
+    candidates.append(_candidate_from_box(missing_target, image, boxes[left_box]))
+    candidates.extend(reversed(suffix))
+    return candidates
+
+
 def match_targets_from_views(
     targets: list[str],
     candidate_views: list[list],
@@ -320,15 +396,29 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
                 )
                 raw_output = "\n".join(raw_outputs)
             except MatchError as fallback_exc:
-                return {
-                    "results": [],
-                    "error": "unsafe_ocr_output",
-                    "detail": str(fallback_exc),
-                    "image_size": list(size),
-                    "method": "glm_ocr_transformers_with_local_positioning",
-                    "raw_output": original_output,
-                    "raw_outputs": raw_outputs,
-                }
+                inferred_results = None
+                for output in raw_outputs:
+                    inferred_candidates = infer_single_missing_target_candidates(image, targets, output, boxes)
+                    if not inferred_candidates:
+                        continue
+                    try:
+                        inferred_results = match_targets(targets, inferred_candidates, size)
+                        break
+                    except MatchError:
+                        continue
+                if inferred_results is not None:
+                    results = inferred_results
+                    raw_output = "\n".join(raw_outputs)
+                else:
+                    return {
+                        "results": [],
+                        "error": "unsafe_ocr_output",
+                        "detail": str(fallback_exc),
+                        "image_size": list(size),
+                        "method": "glm_ocr_transformers_with_local_positioning",
+                        "raw_output": original_output,
+                        "raw_outputs": raw_outputs,
+                    }
     else:
         raw_output = engine.recognize(image_bytes, None)
         results = attach_colored_text_bboxes(image, parse_model_output(raw_output))

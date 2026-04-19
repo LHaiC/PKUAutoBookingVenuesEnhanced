@@ -27,6 +27,14 @@ class WebUiTemplateTests(unittest.TestCase):
         self.assertIn('id="scheduler-summary"', template)
         self.assertIn('id="configs-body"', template)
 
+    def test_scheduler_columns_distinguish_prelaunch_from_booking_action_time(self):
+        with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
+            template = f.read()
+
+        self.assertIn("登录预热秒数", template)
+        self.assertIn("开抢时间", template)
+        self.assertIn("预热启动", template)
+
 
 if __name__ == "__main__":
     unittest.main()

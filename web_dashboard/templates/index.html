@@ -112,7 +112,7 @@
             <div><label>任务配置</label><input id="task-config" value="config.ini"></div>
             <div><label>最大尝试次数</label><input id="task-attempts" type="number" value="120"></div>
             <div><label>间隔秒数</label><input id="task-interval" type="number" value="5"></div>
-            <div><label>提前秒数</label><input id="task-lead" type="number" value="60"></div>
+            <div><label>登录预热秒数</label><input id="task-lead" type="number" value="60"></div>
         </div>
         <div class="actions">
             <button onclick="addTask()">添加任务</button>
@@ -123,7 +123,7 @@
         <div id="task-feedback" class="status"></div>
         <div id="scheduler-summary" class="status"></div>
         <table>
-            <thead><tr><th>启用</th><th>任务</th><th>配置</th><th>场馆</th><th>预约时间</th><th>开跑时间</th><th>重试</th><th>操作</th></tr></thead>
+            <thead><tr><th>启用</th><th>任务</th><th>配置</th><th>场馆</th><th>预约时间</th><th>开抢时间</th><th>预热启动</th><th>重试</th><th>操作</th></tr></thead>
             <tbody id="tasks-body"></tbody>
         </table>
         <p class="small">任务只指向配置文件。场馆和预约时间从对应 config 解析，避免 tasks.json 和 config.ini 重复写时间。</p>
@@ -337,6 +337,7 @@ function renderTasks() {
             <td><input value="${task.config || "config.ini"}" onchange="tasks[${index}].config=this.value"></td>
             <td>${task.venue || "-"}</td>
             <td>${bookingTime}</td>
+            <td>${task.booking_action_at || task.release_at || "-"}</td>
             <td>${task.run_after || "-"}</td>
             <td>${task.max_attempts || 120} 次 / ${task.interval_seconds || 5} 秒</td>
             <td><button class="danger" onclick="deleteTask(${index})">删除</button></td>`;

@@ -5,6 +5,7 @@ import argparse
 import datetime
 import json
 import os
+import time
 
 try:
     from selenium import webdriver
@@ -146,7 +147,32 @@ def log_status(config, start_time, log_str):
     print("记录日志成功\n")
 
 
-def page(config, browser="chrome"):
+def parse_wait_until(value):
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return datetime.datetime.fromisoformat(value)
+
+
+def wait_until_datetime(wait_until):
+    release_time = parse_wait_until(wait_until)
+    if release_time is None:
+        return
+    if release_time > datetime.datetime.now():
+        print(f"等待预约开放至 {release_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    while True:
+        remaining = (release_time - datetime.datetime.now()).total_seconds()
+        if remaining <= 0:
+            break
+        time.sleep(min(remaining, 0.2))
+    print("到达预约开放时间，开始进入预约页面")
+
+
+def page(config, browser="chrome", wait_until=None):
     (
         user_name, password, venue, venue_num, start_time, end_time, wechat_notice,
         sckey, username, pass_word, soft_id, glm_enabled, glm_endpoint, glm_timeout,
@@ -172,6 +198,7 @@ def page(config, browser="chrome"):
             status = False
     if status:
         try:
+            wait_until_datetime(wait_until)
             sleep(2)
             status, log_venue = go_to_venue(driver, venue)
             log_str += log_venue
@@ -281,6 +308,7 @@ def run_cli():
     parser.add_argument("--browser", default="firefox", choices=["firefox", "chrome"])
     parser.add_argument("--retries", type=int, default=3, help="stop after first success")
     parser.add_argument("--once", action="store_true", help="run one attempt only")
+    parser.add_argument("--wait-until", default=None, help="wait until this local datetime after login before entering venue")
     args = parser.parse_args()
 
     # lst_conf = env_check()
@@ -290,7 +318,7 @@ def run_cli():
     retries = 1 if args.once else args.retries
     success = False
     for _ in range(retries):
-        status_main = page(args.config, args.browser)
+        status_main = page(args.config, args.browser, wait_until=args.wait_until)
         if status_main:
             success = True
             break

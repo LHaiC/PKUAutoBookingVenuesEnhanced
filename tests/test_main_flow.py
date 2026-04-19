@@ -67,6 +67,60 @@ class MainFlowTests(unittest.TestCase):
             main.time.sleep = original_sleep
             main.sleep = original_imported_sleep
 
+    def test_page_waits_until_release_after_login_before_entering_venue(self):
+        calls = []
+
+        def fake_load_config(_config):
+            return (
+                "user",
+                "password",
+                "venue",
+                -1,
+                "7-0650",
+                "7-0750",
+                False,
+                "",
+                "",
+                "",
+                "",
+                True,
+                "http://localhost:8000",
+                10,
+                False,
+            )
+
+        class FakeDriver:
+            def quit(self):
+                calls.append("quit")
+
+        patches = {
+            "load_config": fake_load_config,
+            "judge_exceeds_days_limit": lambda _start, _end: (["7-0650"], ["7-0750"], [1], ""),
+            "build_driver": lambda _browser, headless=True: FakeDriver(),
+            "login": lambda *_args, **_kwargs: calls.append("login") or "login\n",
+            "wait_until_datetime": lambda *_args, **_kwargs: calls.append("wait"),
+            "go_to_venue": lambda *_args, **_kwargs: calls.append("venue") or (False, "venue\n"),
+            "log_status": lambda *_args, **_kwargs: calls.append("log"),
+        }
+        originals = {name: getattr(main, name) for name in patches}
+        original_sleep = main.time.sleep
+        original_imported_sleep = main.sleep
+        try:
+            for name, value in patches.items():
+                setattr(main, name, value)
+            main.time.sleep = lambda _seconds: None
+            main.sleep = lambda _seconds: None
+
+            self.assertFalse(main.page("config.ini", "firefox", wait_until="2026-04-19 12:00:00"))
+
+            self.assertLess(calls.index("login"), calls.index("wait"))
+            self.assertLess(calls.index("wait"), calls.index("venue"))
+        finally:
+            for name, value in originals.items():
+                setattr(main, name, value)
+            main.time.sleep = original_sleep
+            main.sleep = original_imported_sleep
+
 
 if __name__ == "__main__":
     unittest.main()

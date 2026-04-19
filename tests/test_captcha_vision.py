@@ -134,7 +134,7 @@ class CaptchaVisionTests(unittest.TestCase):
             ],
         )
 
-    def test_detect_colored_text_bboxes_ignores_saturated_sky_background(self):
+    def test_detect_colored_text_bboxes_ignores_saturated_photo_background(self):
         img = Image.new("RGB", (310, 155), (77, 193, 228))
         draw = ImageDraw.Draw(img)
         draw.rectangle([41, 34, 78, 69], fill=(85, 30, 165))
@@ -154,6 +154,26 @@ class CaptchaVisionTests(unittest.TestCase):
                 [93, 16, 127, 50],
                 [146, 74, 181, 108],
                 [207, 6, 243, 40],
+            ],
+        )
+
+    def test_detect_colored_text_bboxes_ignores_muted_photo_background(self):
+        img = Image.new("RGB", (310, 155), (117, 164, 206))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([8, 71, 44, 107], fill=(85, 30, 165))
+        draw.rectangle([102, 51, 136, 89], fill=(240, 90, 20))
+        draw.rectangle([155, 51, 189, 85], fill=(25, 60, 140))
+        draw.rectangle([207, 84, 240, 116], fill=(170, 45, 160))
+
+        boxes = filter_captcha_text_bboxes(detect_colored_text_bboxes(img), img.size)
+
+        self.assertEqual(
+            boxes,
+            [
+                [8, 71, 45, 108],
+                [102, 51, 137, 90],
+                [155, 51, 190, 86],
+                [207, 84, 241, 117],
             ],
         )
 

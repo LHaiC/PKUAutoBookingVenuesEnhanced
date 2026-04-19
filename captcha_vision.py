@@ -1,6 +1,6 @@
 import io
 import colorsys
-from collections import deque
+from collections import Counter, deque
 
 from PIL import Image
 
@@ -81,13 +81,60 @@ def _colored_text_pixel(r: int, g: int, b: int) -> bool:
     hue *= 360
     if saturation < 0.28 or value > 0.97:
         return False
-    # Some captchas use a saturated blue sky background. It has high value and
-    # connects the whole image into one component unless we exclude it.
-    if 180 <= hue <= 220 and 0.45 <= saturation < 0.75 and value > 0.85:
+    # Some captcha photo backgrounds are saturated enough to look like colored
+    # text. Excluding common blue background tones prevents the whole image from
+    # becoming one component.
+    if 180 <= hue <= 220 and 0.30 <= saturation < 0.65 and value > 0.65:
         return False
     # The captcha background commonly contains green plants. Excluding green
     # prevents those large background components from being treated as text.
     return not (45 <= hue <= 170)
+
+
+def _dominant_background_colors(image: Image.Image, limit: int = 5) -> list[tuple[int, int, int]]:
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    pixels = rgb.load()
+    step = 2 if width * height > 20000 else 1
+    buckets = Counter()
+
+    sample_points = []
+    for x in range(0, width, step):
+        sample_points.append((x, 0))
+        sample_points.append((x, height - 1))
+    for y in range(0, height, step):
+        sample_points.append((0, y))
+        sample_points.append((width - 1, y))
+
+    for x, y in sample_points:
+        if 0 <= x < width and 0 <= y < height:
+            r, g, b = pixels[x, y]
+            buckets[(r // 16, g // 16, b // 16)] += 1
+    total = sum(buckets.values())
+    dominant = [
+        (bucket[0] * 16 + 8, bucket[1] * 16 + 8, bucket[2] * 16 + 8)
+        for bucket, count in buckets.most_common(limit)
+        if count / total >= 0.04
+    ]
+    if dominant:
+        return dominant
+    bucket, _count = buckets.most_common(1)[0]
+    return [(bucket[0] * 16 + 8, bucket[1] * 16 + 8, bucket[2] * 16 + 8)]
+
+
+def _near_background_color(
+    r: int,
+    g: int,
+    b: int,
+    background_colors: list[tuple[int, int, int]],
+    max_distance: int = 42,
+) -> bool:
+    max_distance_sq = max_distance * max_distance
+    for br, bg, bb in background_colors:
+        distance_sq = (r - br) ** 2 + (g - bg) ** 2 + (b - bb) ** 2
+        if distance_sq <= max_distance_sq:
+            return True
+    return False
 
 
 def _merge_nearby_boxes(boxes: list[list[int]], margin: int = 4) -> list[list[int]]:
@@ -113,8 +160,13 @@ def detect_colored_text_bboxes(
     rgb = image.convert("RGB")
     width, height = rgb.size
     pixels = rgb.load()
+    background_colors = _dominant_background_colors(rgb)
     mask = [
-        [_colored_text_pixel(*pixels[x, y]) for x in range(width)]
+        [
+            _colored_text_pixel(*pixels[x, y])
+            and not _near_background_color(*pixels[x, y], background_colors)
+            for x in range(width)
+        ]
         for y in range(height)
     ]
     visited = [[False for _ in range(width)] for _ in range(height)]
@@ -191,11 +243,12 @@ def isolate_colored_text(image: Image.Image) -> Image.Image:
     source = rgb.load()
     target = clean.load()
     width, height = rgb.size
+    background_colors = _dominant_background_colors(rgb)
 
     for y in range(height):
         for x in range(width):
             pixel = source[x, y]
-            if _colored_text_pixel(*pixel):
+            if _colored_text_pixel(*pixel) and not _near_background_color(*pixel, background_colors):
                 target[x, y] = pixel
 
     return clean
