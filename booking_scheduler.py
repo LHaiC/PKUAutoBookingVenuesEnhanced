@@ -89,6 +89,17 @@ def read_booking_config(config_path):
     }
 
 
+def validate_account_config(config_path):
+    conf = configparser.ConfigParser()
+    conf.read(config_path, encoding="utf8")
+    if not conf.has_section("login"):
+        raise ValueError(f"missing [login] section in {config_path}")
+    if not conf.get("login", "user_name", fallback="").strip():
+        raise ValueError(f"missing [login] user_name in {config_path}")
+    if not conf.get("login", "password", fallback="").strip():
+        raise ValueError(f"missing [login] password in {config_path}")
+
+
 def target_date_from_token(token, today=None):
     today = today or dt.date.today()
     date_part = token.split("-", 1)[0].strip()
@@ -201,7 +212,17 @@ def run_task_until_success(task):
     attempts = int(task.get("max_attempts", 120))
     interval = int(task.get("interval_seconds", 5))
     timeout = int(task.get("timeout_seconds", 180))
-    command = build_main_command(task)
+    try:
+        validate_account_config(task_config_path(task))
+        command = build_main_command(task)
+    except Exception as exc:
+        write_scheduler_status({
+            "status": "invalid_config",
+            "task_id": task["id"],
+            "task_name": task["name"],
+            "error": str(exc),
+        })
+        return False
 
     for attempt in range(1, attempts + 1):
         started_at = dt.datetime.now().isoformat(timespec="seconds")

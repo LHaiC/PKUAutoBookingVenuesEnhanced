@@ -11,10 +11,12 @@ from booking_scheduler import (
     describe_task,
     normalize_task,
     release_datetime_for_token,
+    run_task_until_success,
     start_tokens_for_task,
     task_due,
     target_date_from_token,
 )
+import booking_scheduler
 
 
 class BookingSchedulerTests(unittest.TestCase):
@@ -101,6 +103,33 @@ class BookingSchedulerTests(unittest.TestCase):
         self.assertIn("五四体育中心-羽毛球馆", command)
         self.assertIn("--start-time", command)
         self.assertIn("20260425-1300", command)
+
+    def test_run_task_stops_immediately_when_config_has_no_login(self):
+        statuses = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, "bad.ini")
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write("[glm_ocr]\nenabled = true\n")
+
+            original_write = booking_scheduler.write_scheduler_status
+            try:
+                booking_scheduler.write_scheduler_status = lambda payload: statuses.append(payload)
+                result = run_task_until_success(
+                    {
+                        "id": "bad",
+                        "name": "bad task",
+                        "config": config_path,
+                        "venue": "五四体育中心-羽毛球馆",
+                        "start_time": "20260425-1300",
+                        "end_time": "20260425-1500",
+                    }
+                )
+            finally:
+                booking_scheduler.write_scheduler_status = original_write
+
+        self.assertFalse(result)
+        self.assertEqual(statuses[0]["status"], "invalid_config")
+        self.assertIn("missing [login]", statuses[0]["error"])
 
 
 if __name__ == "__main__":

@@ -184,6 +184,10 @@ def status_api():
     running = scheduler_running()
     if pid and running:
         scheduler["pid"] = pid
+    elif scheduler.get("status") in {"started", "waiting", "retrying"}:
+        scheduler = dict(scheduler)
+        scheduler["status"] = "stopped"
+        scheduler.pop("pid", None)
     return jsonify({
         "booking": read_json_file(STATUS_FILE, {"status": "unknown", "last_run": None}),
         "scheduler": scheduler,

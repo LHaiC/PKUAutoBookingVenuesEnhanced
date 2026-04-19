@@ -107,6 +107,8 @@ def build_driver(browser, headless=True):
 def load_config(config):
     conf = ConfigParser()
     conf.read(config, encoding='utf8')
+    if not conf.has_section('login'):
+        raise ValueError(f"配置文件缺少 [login]：{config}")
 
     user_name = conf['login']['user_name']
     password = conf['login']['password']

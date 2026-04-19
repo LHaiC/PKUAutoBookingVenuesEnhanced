@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 import web_dashboard.app as webapp
@@ -77,6 +78,32 @@ class WebUiAppTests(unittest.TestCase):
         self.assertNotIn("[type]", content)
         self.assertNotIn("[time]", content)
         self.assertIn("user_name = u", content)
+
+    def test_status_endpoint_marks_stale_retrying_scheduler_as_stopped(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "scheduler_status.json").write_text(
+                json.dumps({"status": "retrying", "task_name": "old"}),
+                encoding="utf-8",
+            )
+
+            original_root = webapp.ROOT_DIR
+            original_status = webapp.SCHEDULER_STATUS_FILE
+            original_pid = webapp.SCHEDULER_PID_FILE
+            try:
+                webapp.ROOT_DIR = root
+                webapp.SCHEDULER_PID_FILE = root / ".scheduler.pid"
+                webapp.SCHEDULER_STATUS_FILE = root / "scheduler_status.json"
+                response = webapp.app.test_client().get("/api/status")
+            finally:
+                webapp.ROOT_DIR = original_root
+                webapp.SCHEDULER_STATUS_FILE = original_status
+                webapp.SCHEDULER_PID_FILE = original_pid
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertFalse(payload["scheduler_running"])
+        self.assertEqual(payload["scheduler"]["status"], "stopped")
 
 
 if __name__ == "__main__":
