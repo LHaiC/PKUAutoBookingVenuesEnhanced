@@ -6,19 +6,24 @@ import json
 
 
 def wechat_notification(user_name, venue, venue_num, start_time, end_time, sckey):
+    content = (
+        f"学号：{user_name}\n"
+        f"成功预约：{venue}\n"
+        f"场地编号：{venue_num}\n"
+        f"开始时间：{start_time}\n"
+        f"结束时间：{end_time}\n"
+        f"请及时去付款！"
+    )
     with request.urlopen(
-            quote('https://sctapi.ftqq.com/' + sckey + '.send?title=成功预约&desp=学号：' +
-                  str(user_name) + ' 成功预约：' + str(venue) + " 场地编号："+str(venue_num) +
-                  " 开始时间："+str(start_time)+" 结束时间："+str(end_time),
+            quote(f'http://www.pushplus.plus/send?token={sckey}&title=成功预约&content={content}',
                   safe='/:?=&')) as response:
         response = json.loads(response.read().decode('utf-8'))
-        if response['code'] == 0 and response['data']['error'] == 'SUCCESS':
+        if response.get('code') == 0 or response.get('msg') == 'success' or '执行成功' in str(response):
             print('微信通知成功')
         else:
-            print(str(response['errno']) + ' error: ' + response['errmsg'])
+            print('error: ' + str(response))
     return "微信通知成功\n"
 
 
 if __name__ == '__main__':
-    wechat_notification('', "羽毛球场测试",
-                        "")
+    wechat_notification('', "羽毛球场测试", "", "", "")
