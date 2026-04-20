@@ -10,11 +10,8 @@ def whiten_watermark(image: Image.Image, x_ratio: float = 0.78, y_ratio: float =
     wx = int(width * x_ratio)
     wy = int(height * y_ratio)
     if wx < width and wy < height:
-        clean = rgb.copy()
-        for y in range(wy, height):
-            for x in range(wx, width):
-                clean.putpixel((x, y), (255, 255, 255))
-        return clean
+        white = Image.new("RGB", (width - wx, height - wy), (255, 255, 255))
+        rgb.paste(white, (wx, wy))
     return rgb
 
 
