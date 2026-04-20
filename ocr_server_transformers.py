@@ -361,6 +361,40 @@ def recognize_box_crops(image, boxes):
     return results
 
 
+def recognize_rotated_box_crops(image, targets, boxes):
+    """
+    Per-box OCR with rotation fallback. Tries 4 angles per box.
+    Returns list of Candidate objects or empty list on failure.
+    """
+    if not boxes or engine is None or not engine.loaded:
+        return []
+
+    target_set = set(targets)
+    candidates = []
+    for box in boxes:
+        crop = crop_box_image(image, box, padding=5)
+        crop_bytes = image_to_png_bytes(crop)
+        best_char = None
+        for angle in (0, 90, 180, 270):
+            rotated = crop.rotate(angle, expand=True, fillcolor="white")
+            rotated_bytes = image_to_png_bytes(rotated)
+            output = engine.recognize(rotated_bytes, None)
+            chars = re.findall(r"[\u4e00-\u9fff]", output.replace("<|user|>", "").strip())
+            if len(chars) == 1 and chars[0] in target_set:
+                best_char = chars[0]
+                break
+        if best_char:
+            from captcha_matcher import Candidate
+            candidates.append(Candidate(
+                text=best_char,
+                bbox=box,
+                confidence=0.80,
+            ))
+        else:
+            return []  # fail whole fallback
+    return candidates
+
+
 def match_targets_from_views(
     targets: list[str],
     candidate_views: list[list],
@@ -485,69 +519,72 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
     detected_boxes = detect_colored_text_bboxes(image)
     boxes = filter_captcha_text_bboxes(detected_boxes, size) or detected_boxes
 
-    if targets:
-        original_output = engine.recognize(image_bytes, None)
-        original_candidates = candidates_from_output(image, original_output, boxes)
-        original_candidates = expand_confusable_target_candidates(original_candidates, targets)
-        try:
-            results = match_targets(targets, original_candidates, size)
-            raw_output = original_output
-        except MatchError as exc:
-            recognition_bytes = prepare_recognition_image_bytes(image, use_strip=True, boxes=boxes)
-            strip_output = engine.recognize(recognition_bytes, None)
-            strip_candidates = candidates_from_output(image, strip_output, boxes)
-            strip_candidates = expand_confusable_target_candidates(strip_candidates, targets)
-            raw_outputs = [original_output, strip_output]
-            try:
-                results = match_targets_from_views(
-                    targets,
-                    [original_candidates, strip_candidates],
-                    size,
-                )
-                raw_output = "\n".join(raw_outputs)
-            except MatchError as fallback_exc:
-                inferred_results = None
-                for output in raw_outputs:
-                    inferred_candidates = infer_single_missing_target_candidates(image, targets, output, boxes)
-                    if not inferred_candidates:
-                        continue
-                    try:
-                        inferred_results = match_targets(targets, inferred_candidates, size)
-                        break
-                    except MatchError:
-                        continue
-                if inferred_results is not None:
-                    results = inferred_results
-                    raw_output = "\n".join(raw_outputs)
-                else:
-                    rotated_candidates = recognize_rotated_box_candidates(image, targets, boxes)
-                    try:
-                        results = match_targets_from_views(
-                            targets,
-                            [original_candidates, strip_candidates, rotated_candidates],
-                            size,
-                        )
-                        raw_output = "\n".join(raw_outputs)
-                    except MatchError:
-                        return {
-                            "results": [],
-                            "error": "unsafe_ocr_output",
-                            "detail": str(fallback_exc),
-                            "image_size": list(size),
-                            "method": "glm_ocr_transformers_with_local_positioning",
-                            "raw_output": original_output,
-                            "raw_outputs": raw_outputs,
-                        }
-    else:
-        raw_output = engine.recognize(image_bytes, None)
-        results = attach_colored_text_bboxes(image, parse_model_output(raw_output))
+    if not boxes:
+        return {
+            "results": [],
+            "error": "no_boxes_detected",
+            "image_size": list(size),
+            "method": "per_box_ocr",
+            "raw_output": "",
+        }
 
-    return {
-        "results": results,
-        "image_size": list(size),
-        "method": "glm_ocr_transformers_with_local_positioning",
-        "raw_output": raw_output,
-    }
+    # Filter watermark boxes from bottom-right corner
+    filtered_boxes = filter_watermark_boxes(boxes, size)
+    # Fall back to original if all filtered
+    use_boxes = filtered_boxes if filtered_boxes else boxes
+
+    if targets:
+        # Main path: per-box OCR
+        per_box_results = recognize_box_crops(image, use_boxes)
+        if per_box_results and len(per_box_results) == len(use_boxes):
+            from captcha_matcher import Candidate, match_targets
+            try:
+                matched = match_targets(targets, [
+                    Candidate(text=r["text"], bbox=r["bbox"], confidence=r.get("confidence", 0.80))
+                    for r in per_box_results
+                ], size)
+                return {
+                    "results": matched,
+                    "image_size": list(size),
+                    "method": "per_box_ocr",
+                    "raw_output": "",
+                }
+            except MatchError:
+                pass
+
+        # Fallback: rotated per-box OCR
+        rotated_candidates = recognize_rotated_box_crops(image, targets, use_boxes)
+        if rotated_candidates:
+            from captcha_matcher import Candidate, match_targets
+            try:
+                matched = match_targets(targets, rotated_candidates, size)
+                return {
+                    "results": matched,
+                    "image_size": list(size),
+                    "method": "rotated_per_box_ocr",
+                    "raw_output": "",
+                }
+            except MatchError:
+                pass
+
+        # All failed
+        return {
+            "results": [],
+            "error": "unsafe_ocr_output",
+            "detail": "per_box_ocr failed, rotated fallback also failed",
+            "image_size": list(size),
+            "method": "per_box_ocr",
+            "raw_output": "",
+        }
+
+    else:
+        # No targets: return all detected chars with boxes
+        per_box_results = recognize_box_crops(image, use_boxes)
+        return {
+            "results": per_box_results,
+            "image_size": list(size),
+            "method": "per_box_ocr",
+        }
 
 
 @app.post("/glmocr/parse")

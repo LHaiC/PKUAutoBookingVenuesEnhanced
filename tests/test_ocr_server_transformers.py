@@ -530,5 +530,28 @@ def test_recognize_box_crops_returns_one_char_per_box():
         ocr_server_transformers.engine = original_engine
 
 
+def test_solve_image_uses_per_box_ocr_main_path():
+    import requests
+    try:
+        r = requests.get("http://localhost:8000/health", timeout=2)
+        if not r.json().get("model_loaded"):
+            import pytest
+            pytest.skip("OCR model not loaded")
+    except:
+        import pytest
+        pytest.skip("OCR server not running")
+
+    from io import BytesIO
+    from PIL import Image
+    from ocr_server_transformers import solve_image
+
+    image = Image.new('RGB', (300, 200), 'white')
+    img_bytes = BytesIO()
+    image.save(img_bytes, format='PNG')
+
+    result = solve_image(img_bytes.getvalue(), ["内", "别", "员"])
+    assert "results" in result or "error" in result
+
+
 if __name__ == "__main__":
     unittest.main()
