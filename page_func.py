@@ -88,7 +88,8 @@ def click_venue_card(driver, venue):
                 EC.element_to_be_clickable((By.XPATH, xpath))
             )
             driver.execute_script('arguments[0].scrollIntoView({block: "center"});', element)
-            time.sleep(0.3)
+            # scrollIntoView 后保留极短缓冲，避免 headless 模式下偶发点击抖动
+            time.sleep(0.05)
             driver.execute_script('arguments[0].click();', element)
             return
         except Exception as exc:
@@ -122,18 +123,18 @@ def login(driver, user_name, password, retry=0):
     redirectUrl = 'https://portal.pku.edu.cn/portal2017/ssoLogin.do'
     driver.get('https://portal.pku.edu.cn/portal2017/')
     driver.get(f'{iaaaUrl}?appID={appID}&appName={appName}&redirectUrl={redirectUrl}')
-    time.sleep(2)
+    # time.sleep(2)  # disabled for perf
     WebDriverWait(driver, 10).until_not(
         EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
     WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, 'logon_button')))
     driver.find_element(By.ID, 'user_name').send_keys(user_name)
     WebDriverWait(driver, 10).until_not(
         EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
-    time.sleep(0.2)
+    # time.sleep(0.2)  # disabled for perf
     driver.find_element(By.ID, 'password').send_keys(password)
     WebDriverWait(driver, 10).until_not(
         EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
-    time.sleep(0.2)
+    # time.sleep(0.2)  # disabled for perf
     driver.find_element(By.ID, 'logon_button').click()
     try:
         WebDriverWait(driver, 50).until(EC.visibility_of_element_located((By.ID, 'all')))
@@ -141,7 +142,7 @@ def login(driver, user_name, password, retry=0):
         return '门户登录成功\n'
     except:
         print('Retrying...')
-        login(driver, user_name, password, retry + 1)
+        return login(driver, user_name, password, retry + 1)
 
 
 def go_to_venue(driver, venue, retry=0):
@@ -161,14 +162,13 @@ def go_to_venue(driver, venue, retry=0):
             EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
         WebDriverWait(driver, 10).until(
             EC.visibility_of_element_located((By.ID, 'tag_s_venues')))
-        time.sleep(0.5)
+        # time.sleep(0.5)  # disabled for perf
         driver.find_element(By.ID, 'tag_s_venues').click()
-        while len(driver.window_handles) < 2:
-            time.sleep(0.5)
+        WebDriverWait(driver, 10).until(lambda d: len(d.window_handles) >= 2)
         driver.switch_to.window(driver.window_handles[-1])
         WebDriverWait(driver, 10).until_not(
             EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
-        time.sleep(5)
+        # time.sleep(5)  # disabled for perf
         click_venue_card(driver, venue)
         WebDriverWait(driver, 10).until(
             EC.visibility_of_element_located((By.XPATH, "//*[contains(text(), '当前位置')]")))
@@ -273,7 +273,7 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
             EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
         driver.find_element(By.XPATH,
                             f'/html/body/div[1]/div/div/div[3]/div[2]/div/div[1]/div[2]/div[1]/div[2]/div[{delta_day + 1}]').click()
-        # time.sleep(0.2)
+        # time.sleep(0.2)  # disabled for perf
 
     def next_page():
         # 如果第一页没有，就往后翻，直到不存在下一页
@@ -299,7 +299,7 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
                 return column
             try:
                 next_page()
-                time.sleep(0.5)
+                # time.sleep(0.5)  # disabled for perf
             except Exception:
                 break
         raise ValueError(f"页面上找不到预约时间段: {str(start_time).split()[1][:5]}")
@@ -354,7 +354,7 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
             if flag == 2:
                 break
             else:
-                time.sleep(0.5)
+                time.sleep(0.05)  # 接近放号时提高轮询精度，减少错过窗口的概率
         driver.refresh()
         WebDriverWait(driver, 5).until_not(
             EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
@@ -366,7 +366,6 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
 
         if k != 0:
             driver.refresh()
-            time.sleep(0.5)
 
         move_to_date(delta_day)
 
@@ -472,7 +471,7 @@ def submit_order_candidates(driver):
     return candidates
 
 
-def click_submit_order(driver, timeout=10, poll_interval=0.2):
+def click_submit_order(driver, timeout=10, poll_interval=0.05):
     print("提交订单")
     log_str = "提交订单\n"
     driver.switch_to.window(driver.window_handles[-1])
@@ -481,8 +480,6 @@ def click_submit_order(driver, timeout=10, poll_interval=0.2):
             EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
     except Exception:
         pass
-    time.sleep(0.5)
-
     deadline = time.time() + timeout
     while True:
         candidates = submit_order_candidates(driver)
@@ -492,7 +489,7 @@ def click_submit_order(driver, timeout=10, poll_interval=0.2):
                 driver.execute_script('arguments[0].scrollIntoView({block: "center"});', element)
             except Exception:
                 pass
-            time.sleep(0.2)
+            time.sleep(0.05)  # scroll 后做极短稳定，避免点击丢失
             try:
                 element.click()
             except Exception:
@@ -500,7 +497,7 @@ def click_submit_order(driver, timeout=10, poll_interval=0.2):
             break
         if time.time() >= deadline:
             raise RuntimeError("找不到提交订单按钮")
-        time.sleep(poll_interval)
+        time.sleep(poll_interval)  # disabled for perf
     # result = EC.alert_is_present()(driver)
     print("提交订单成功")
     log_str += "提交订单成功\n"
@@ -508,19 +505,131 @@ def click_submit_order(driver, timeout=10, poll_interval=0.2):
 
 
 def verify(driver, glm_enabled, glm_endpoint, glm_timeout,
-           allow_chaojiying_fallback, cy_username, cy_password, cy_soft_id):
+           allow_chaojiying_fallback, cy_username, cy_password, cy_soft_id,
+           glm_proxy: str | None = None):
     from captcha_solver import solve_captcha
     return solve_captcha(driver, glm_enabled, glm_endpoint, glm_timeout,
                          allow_chaojiying_fallback, cy_username, cy_password,
-                         cy_soft_id)
+                         cy_soft_id, glm_proxy=glm_proxy)
 
 
-def click_pay(driver, manual_wait_seconds=30):
-    print("付款（校园卡）")
-    log_str = "付款（校园卡）\n"
-    time.sleep(manual_wait_seconds)
-    print("订单已提交，需要用户自行付款")
-    log_str += "订单已提交，需要用户自行付款\n"
+def print_page_visible_text(driver, label="页面可见文本"):
+    """打印当前页面所有可见文本内容用于调试"""
+    try:
+        body = driver.find_element(By.TAG_NAME, "body")
+        # 获取所有文本，包括嵌套元素的
+        text = driver.execute_script("return document.body.innerText")
+        preview = text[:3000] if len(text) > 3000 else text
+        print(f"\n=== {label} ===")
+        print(preview if preview.strip() else "[空]")
+        print("=== END TEXT ===\n")
+    except Exception as exc:
+        print(f"获取页面文本失败: {exc}")
+
+
+def screenshot_all_tabs(driver, prefix="tab"):
+    """截图所有tab并保存，用于调试"""
+    import datetime
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    handles = driver.window_handles
+    for i, handle in enumerate(handles):
+        driver.switch_to.window(handle)
+        path = f"{prefix}-{stamp}-tab{i}.png"
+        try:
+            driver.save_screenshot(path)
+            print(f"已保存 Tab {i} 截图: {path}, URL: {driver.current_url}")
+        except Exception as exc:
+            print(f"保存 Tab {i} 截图失败: {exc}")
+
+
+def save_page_html(driver, path="page_debug.html", label="页面HTML"):
+    """保存当前页面完整HTML到文件用于调试"""
+    try:
+        html = driver.page_source
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"已保存页面HTML到: {path}")
+    except Exception as exc:
+        print(f"保存页面HTML失败: {exc}")
+
+
+def click_pay(driver):
+    print("付款（电子校园卡）")
+    log_str = "付款（电子校园卡）\n"
+
+    # 检查是否有待处理的安全验证
+    try:
+        captcha_hint = driver.find_element(By.CLASS_NAME, "select-word").get_attribute("textContent")
+        if captcha_hint and '请依次点击' in captcha_hint:
+            print(f"发现待处理验证码: {captcha_hint}")
+            # 提取目标字符
+            import re
+            targets = re.findall(r'[\u4e00-\u9fff]', captcha_hint)
+            if targets:
+                print(f"目标字符: {targets}")
+                # 获取验证码图片并解决
+                from captcha_solver import solve_captcha
+                try:
+                    solve_captcha(driver, True, 'http://localhost:8000', 30, False, '', '', '')
+                    print("二次验证码完成")
+                    log_str += "二次验证码完成\n"
+                except Exception as exc:
+                    print(f"二次验证码失败: {exc}")
+                    log_str += f"二次验证码失败: {exc}\n"
+    except Exception:
+        pass
+
+    # 提交订单后等待新窗口出现
+    original_handles = driver.window_handles
+    original_count = len(original_handles)
+    try:
+        WebDriverWait(driver, 15).until(
+            lambda d: len(d.window_handles) > original_count
+        )
+    except Exception:
+        print(f"未检测到新窗口，当前窗口数: {len(driver.window_handles)}")
+
+    handles = driver.window_handles
+    print(f"当前窗口数: {len(handles)}, 切换到: {handles[-1]}")
+    driver.switch_to.window(handles[-1])
+
+    # 等待 spinner 消失
+    try:
+        WebDriverWait(driver, 10).until_not(
+            EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix"))
+        )
+    except Exception:
+        pass
+
+    # 尝试点击"支付"按钮（通用匹配：含"支付"文本的按钮）
+    try:
+        pay_button_xpath = "//button[contains(text(),'支付')]"
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, pay_button_xpath)))
+        driver.find_element(By.XPATH, pay_button_xpath).click()
+        print("已点击支付按钮")
+        log_str += "已点击支付按钮\n"
+    except Exception as exc:
+        print(f"未找到支付按钮，尝试其他方式: {exc}")
+        print_page_visible_text(driver, "支付页面内容")
+        # 备用：点击任何包含"支付"的可点击元素
+        try:
+            alt_xpath = "//*[contains(text(),'支付')]"
+            elems = driver.find_elements(By.XPATH, alt_xpath)
+            for elem in elems:
+                if elem.is_displayed() and elem.is_enabled():
+                    try:
+                        elem.click()
+                        print(f"备用点击成功: {elem.text}")
+                        log_str += f"备用点击: {elem.text}\n"
+                        break
+                    except Exception:
+                        continue
+        except Exception as e2:
+            print(f"备用点击也失败: {e2}")
+            log_str += f"支付按钮点击失败: {exc}\n"
+
+    log_str += "付款完成\n"
+    print("付款完成")
     return log_str
 
 

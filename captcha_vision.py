@@ -379,7 +379,7 @@ def detect_colored_text_bboxes(
             merged.append(dbox)
 
     # Merge nearby boxes
-    result = _merge_nearby_boxes(merged, margin=4)
+    result = _merge_nearby_boxes(merged, margin=1)
     result.sort(key=lambda box: (box[0], box[1]))
     result = [box for box in result if validate_bbox(box, image.size)]
 

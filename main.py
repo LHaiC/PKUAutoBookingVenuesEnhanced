@@ -1,6 +1,5 @@
 from configparser import ConfigParser
 from os import stat
-from time import sleep
 import argparse
 import datetime
 import json
@@ -170,7 +169,8 @@ def wait_until_datetime(wait_until):
         remaining = (release_time - datetime.datetime.now()).total_seconds()
         if remaining <= 0:
             break
-        time.sleep(min(remaining, 0.2))
+        poll_interval = 0.2 if remaining > 3 else 0.05
+        time.sleep(min(remaining, poll_interval))
     print("到达预约开放时间，开始进入预约页面")
 
 
@@ -182,6 +182,7 @@ def page(
     venue_num_override=None,
     start_time_override=None,
     end_time_override=None,
+    glm_proxy: str | None = None,
 ):
     (
         user_name, password, venue, venue_num, start_time, end_time, wechat_notice,
@@ -207,7 +208,7 @@ def page(
 
     if status:
         try:
-            sleep(2)
+            # 这里原本固定等待 2 秒，但 login() 内部已经有显式等待，去掉可直接开始登录
             log_str += login(driver, user_name, password, retry=0)
         except:
             log_str += "登录失败\n"
@@ -215,7 +216,7 @@ def page(
     if status:
         try:
             wait_until_datetime(wait_until)
-            sleep(2)
+            # 到点后直接进入场馆页；go_to_venue() 自带显式等待
             status, log_venue = go_to_venue(driver, venue)
             log_str += log_venue
         except:
@@ -223,7 +224,7 @@ def page(
             status = False
     if status:
         try:
-            sleep(2)
+            # 进入预约页后直接查找空闲场地；book() 内部会等待页面加载完成
             status, log_book, start_time, end_time, venue_num = book(driver, start_time_list_new,
                                                                  end_time_list_new, delta_day_list, venue, venue_num)
             log_str += log_book
@@ -251,6 +252,7 @@ def page(
             log_str += verify(
                 driver, glm_enabled, glm_endpoint, glm_timeout,
                 allow_chaojiying_fallback, username, pass_word, soft_id,
+                glm_proxy=glm_proxy,
             )
         except Exception as exc:
             log_str += f"安全验证失败: {exc}\n"
@@ -277,7 +279,7 @@ def page(
         except:
             log_str += "微信通知失败\n"
             print("微信通知失败\n")
-    time.sleep(10)
+    # 原先这里固定等待 10 秒再退出，会显著拖慢整次预约；前面的点击已完成，直接收尾即可
 
     # 写入状态文件供Dashboard读取
     status_data = {
@@ -329,6 +331,7 @@ def run_cli():
     parser.add_argument("--venue-num", default=None, help="venue number, overrides config [type] venue_num")
     parser.add_argument("--start-time", default=None, help="booking start_time, overrides config [time] start_time")
     parser.add_argument("--end-time", default=None, help="booking end_time, overrides config [time] end_time")
+    parser.add_argument("--glm-proxy", default=None, help="proxy URL for GLM-OCR requests (e.g. http://127.0.0.1:7890), default: no proxy")
     args = parser.parse_args()
 
     # lst_conf = env_check()
@@ -346,6 +349,7 @@ def run_cli():
             venue_num_override=args.venue_num,
             start_time_override=args.start_time,
             end_time_override=args.end_time,
+            glm_proxy=args.glm_proxy,
         )
         if status_main:
             success = True
