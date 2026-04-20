@@ -25,6 +25,7 @@ from captcha_vision import (
     filter_captcha_text_bboxes,
     image_size,
     refine_bbox_to_dark_pixels,
+    whiten_watermark,
 )
 
 
@@ -146,12 +147,18 @@ def attach_colored_text_bboxes(
     if not boxes:
         return candidates
 
+    # Pair chars with boxes by x-position (left-to-right), not by index
+    # This handles cases where some boxes are noise/merged
+    # Sort boxes by x1 (left edge), greedily assign to chars in order
+    sorted_box_indices = sorted(range(len(boxes)), key=lambda i: boxes[i][0])
     updated = []
-    for item, bbox in zip(candidates[: len(boxes)], boxes):
+    for ci, item in enumerate(candidates):
         item = dict(item)
         if len(item.get("bbox", [])) != 4:
-            item["bbox"] = bbox
+            if ci < len(sorted_box_indices):
+                item["bbox"] = boxes[sorted_box_indices[ci]]
         updated.append(item)
+
     if not trim_to_boxes:
         updated.extend(candidates[len(updated) :])
     return updated
@@ -189,14 +196,42 @@ def crop_box_image(image: Image.Image, box: list[int], padding: int = 10) -> Ima
     )
 
 
+def recognize_box_crops(
+    image: Image.Image,
+    boxes: list[list[int]],
+    padding: int = 10,
+) -> list[Candidate]:
+    """
+    Recognize text in each box individually by cropping and sending to GLM OCR.
+    This is more accurate than full-image OCR when boxes are correct.
+    """
+    candidates = []
+    for box in boxes:
+        crop = crop_box_image(image, box, padding=padding)
+        crop_bytes = image_to_png_bytes(crop)
+        output = engine.recognize(crop_bytes, None)
+        parsed = parse_model_output(output)
+        # Take the first character from each box's recognition
+        for item in parsed:
+            text = str(item.get("text", "")).strip()
+            if len(text) == 1:
+                # Use the refined box as bbox
+                refined_bbox = refine_bbox_to_dark_pixels(image, [int(v) for v in box])
+                candidates.append(Candidate(text=text, bbox=refined_bbox, confidence=0.60))
+                break
+        else:
+            # No single char found in this box - skip
+            pass
+    return candidates
+
+
 def candidates_from_output(
     image: Image.Image,
     output: str,
     boxes: list[list[int]],
 ) -> list:
     parsed = parse_model_output(output)
-    if boxes and len(parsed) < len(boxes):
-        return []
+    # If boxes > chars, don't reject - match greedily (some boxes may be noise)
     candidates = attach_colored_text_bboxes(
         image,
         parsed,
@@ -214,13 +249,15 @@ def candidates_from_output(
 
 
 def expand_confusable_target_candidates(candidates: list[Candidate], targets: list[str]) -> list[Candidate]:
-    if "三" not in targets or "川" in targets:
-        return candidates
-
     expanded = list(candidates)
-    for candidate in candidates:
-        if candidate.text == "川":
-            expanded.append(Candidate(text="三", bbox=list(candidate.bbox), confidence=0.50))
+    if "三" in targets and "川" not in targets:
+        for candidate in candidates:
+            if candidate.text == "川":
+                expanded.append(Candidate(text="三", bbox=list(candidate.bbox), confidence=0.50))
+    if "心" in targets and "必" not in targets:
+        for candidate in candidates:
+            if candidate.text == "必":
+                expanded.append(Candidate(text="心", bbox=list(candidate.bbox), confidence=0.50))
     return expanded
 
 
@@ -332,83 +369,6 @@ def recognize_rotated_box_candidates(
     return candidates
 
 
-def recognize_box_crops(image, boxes):
-    """
-    Recognize each box region individually via GLM.
-
-    Returns: list of dicts [{"text": char, "bbox": [x1,y1,x2,y2]}, ...]
-            Returns empty list if any box fails to produce exactly 1 character.
-    """
-    if not boxes or engine is None or not engine.loaded:
-        return []
-
-    results = []
-    for box in boxes:
-        crop = crop_box_image(image, box, padding=5)
-        crop_bytes = image_to_png_bytes(crop)
-        output = engine.recognize(crop_bytes, None)
-
-        chars = re.findall(r"[\u4e00-\u9fff]", output.replace("<|user|>", "").strip())
-        if len(chars) != 1:
-            return []  # fail: not exactly one Chinese char
-
-        results.append({
-            "text": chars[0],
-            "bbox": box,
-            "confidence": 0.80,
-        })
-
-    return results
-
-
-def recognize_rotated_box_crops(image, targets, boxes):
-    """
-    Per-box OCR with rotation fallback. Tries 4 angles per box.
-    Returns list of Candidate objects or empty list on failure.
-    """
-    if not boxes or engine is None or not engine.loaded:
-        return []
-
-    target_set = set(targets)
-    candidates = []
-    for box in boxes:
-        crop = crop_box_image(image, box, padding=5)
-        crop_bytes = image_to_png_bytes(crop)
-        best_char = None
-        for angle in (0, 90, 180, 270):
-            rotated = crop.rotate(angle, expand=True, fillcolor="white")
-            rotated_bytes = image_to_png_bytes(rotated)
-            output = engine.recognize(rotated_bytes, None)
-            chars = re.findall(r"[\u4e00-\u9fff]", output.replace("<|user|>", "").strip())
-            if len(chars) == 1 and chars[0] in target_set:
-                best_char = chars[0]
-                break
-        if best_char:
-            candidates.append(Candidate(
-                text=best_char,
-                bbox=box,
-                confidence=0.80,
-            ))
-        else:
-            # Special case: 三/川 confusion - check raw output for "111"
-            if "三" in target_set and "川" not in target_set:
-                crop = crop_box_image(image, box, padding=5)
-                raw_text = ""
-                for angle in (0, 90, 180, 270):
-                    rotated = crop.rotate(angle, expand=True, fillcolor="white")
-                    rotated_bytes = image_to_png_bytes(rotated)
-                    raw_text += engine.recognize(rotated_bytes, None)
-                if "111" in raw_text:
-                    candidates.append(Candidate(
-                        text="三",
-                        bbox=box,
-                        confidence=0.50,
-                    ))
-                    continue
-            return []  # fail whole fallback
-    return candidates
-
-
 def match_targets_from_views(
     targets: list[str],
     candidate_views: list[list],
@@ -438,23 +398,6 @@ def match_targets_from_views(
         matched.append(result)
 
     return matched
-
-
-def filter_watermark_boxes(boxes, image_size):
-    """
-    Remove boxes in the bottom-right watermark zone.
-    Watermark "场馆预约" is in the bottom-right corner.
-    Filter condition: box right >= 75% width AND box bottom >= 85% height
-    """
-    if not boxes:
-        return boxes
-    width, height = image_size
-    threshold_x = 0.75
-    threshold_y = 0.85
-    return [
-        box for box in boxes
-        if not (box[2] >= width * threshold_x and box[3] >= height * threshold_y)
-    ]
 
 
 @contextmanager
@@ -523,7 +466,7 @@ class GlmOcrEngine:
 
 def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
     try:
-        image = decode_image(image_bytes)
+        image = whiten_watermark(decode_image(image_bytes))  # whiten watermark once
     except (UnidentifiedImageError, OSError) as exc:
         raise HTTPException(status_code=400, detail="Invalid image data") from exc
     if engine is None or not engine.loaded:
@@ -531,74 +474,85 @@ def solve_image(image_bytes: bytes, targets: list[str] | None) -> dict:
 
     size = image_size(image)
     detected_boxes = detect_colored_text_bboxes(image)
-    boxes = filter_captcha_text_bboxes(detected_boxes, size) or detected_boxes
-
-    if not boxes:
-        return {
-            "results": [],
-            "error": "no_boxes_detected",
-            "image_size": list(size),
-            "method": "per_box_ocr",
-            "raw_output": "",
-        }
-
-    # Filter watermark boxes from bottom-right corner
-    filtered_boxes = filter_watermark_boxes(boxes, size)
-    # Fall back to original if all filtered
-    use_boxes = filtered_boxes if filtered_boxes else boxes
+    # No bottom_ratio filter needed - watermark is already removed by whiten_watermark
+    boxes = detected_boxes
 
     if targets:
-        # Main path: per-box OCR
-        per_box_results = recognize_box_crops(image, use_boxes)
-        if per_box_results and len(per_box_results) == len(use_boxes):
-            from captcha_matcher import Candidate, match_targets
+        # Per-box OCR: crop each box and recognize individually
+        # This is more accurate when boxes are correct
+        box_candidates = recognize_box_crops(image, boxes)
+        box_candidates = expand_confusable_target_candidates(box_candidates, targets)
+        try:
+            results = match_targets(targets, box_candidates, size)
+            raw_output = "per_box:" + ",".join(f"{c.text}" for c in box_candidates)
+        except MatchError as exc:
+            # Fallback: use whole-image OCR
+            import io as _io
+            whitened_buf = _io.BytesIO()
+            image.save(whitened_buf, format="PNG")
+            whitened_bytes = whitened_buf.getvalue()
+            original_output = engine.recognize(whitened_bytes, None)
+            original_candidates = candidates_from_output(image, original_output, boxes)
+            original_candidates = expand_confusable_target_candidates(original_candidates, targets)
             try:
-                matched = match_targets(targets, [
-                    Candidate(text=r["text"], bbox=r["bbox"], confidence=r.get("confidence", 0.80))
-                    for r in per_box_results
-                ], size)
-                return {
-                    "results": matched,
-                    "image_size": list(size),
-                    "method": "per_box_ocr",
-                    "raw_output": "",
-                }
-            except MatchError:
-                pass
-
-        # Fallback: rotated per-box OCR
-        rotated_candidates = recognize_rotated_box_crops(image, targets, use_boxes)
-        if rotated_candidates:
-            from captcha_matcher import Candidate, match_targets
-            try:
-                matched = match_targets(targets, rotated_candidates, size)
-                return {
-                    "results": matched,
-                    "image_size": list(size),
-                    "method": "rotated_per_box_ocr",
-                    "raw_output": "",
-                }
-            except MatchError:
-                pass
-
-        # All failed
-        return {
-            "results": [],
-            "error": "unsafe_ocr_output",
-            "detail": "per_box_ocr failed, rotated fallback also failed",
-            "image_size": list(size),
-            "method": "per_box_ocr",
-            "raw_output": "",
-        }
-
+                results = match_targets(targets, original_candidates, size)
+                raw_output = original_output
+            except MatchError as exc2:
+                recognition_bytes = prepare_recognition_image_bytes(image, use_strip=True, boxes=boxes)
+                strip_output = engine.recognize(recognition_bytes, None)
+                strip_candidates = candidates_from_output(image, strip_output, boxes)
+                strip_candidates = expand_confusable_target_candidates(strip_candidates, targets)
+                raw_outputs = [original_output, strip_output]
+                try:
+                    results = match_targets_from_views(
+                        targets,
+                        [original_candidates, strip_candidates, box_candidates],
+                        size,
+                    )
+                    raw_output = "\n".join(raw_outputs)
+                except MatchError as fallback_exc:
+                    inferred_results = None
+                    for output in raw_outputs:
+                        inferred_candidates = infer_single_missing_target_candidates(image, targets, output, boxes)
+                        if not inferred_candidates:
+                            continue
+                        try:
+                            inferred_results = match_targets(targets, inferred_candidates, size)
+                            break
+                        except MatchError:
+                            continue
+                    if inferred_results is not None:
+                        results = inferred_results
+                        raw_output = "\n".join(raw_outputs)
+                    else:
+                        rotated_candidates = recognize_rotated_box_candidates(image, targets, boxes)
+                        try:
+                            results = match_targets_from_views(
+                                targets,
+                                [original_candidates, strip_candidates, rotated_candidates, box_candidates],
+                                size,
+                            )
+                            raw_output = "\n".join(raw_outputs)
+                        except MatchError:
+                            return {
+                                "results": [],
+                                "error": "unsafe_ocr_output",
+                                "detail": str(fallback_exc),
+                                "image_size": list(size),
+                                "method": "glm_ocr_transformers_with_local_positioning",
+                                "raw_output": original_output,
+                                "raw_outputs": raw_outputs,
+                            }
     else:
-        # No targets: return all detected chars with boxes
-        per_box_results = recognize_box_crops(image, use_boxes)
-        return {
-            "results": per_box_results,
-            "image_size": list(size),
-            "method": "per_box_ocr",
-        }
+        raw_output = engine.recognize(image_bytes, None)
+        results = attach_colored_text_bboxes(image, parse_model_output(raw_output))
+
+    return {
+        "results": results,
+        "image_size": list(size),
+        "method": "glm_ocr_transformers_with_local_positioning",
+        "raw_output": raw_output,
+    }
 
 
 @app.post("/glmocr/parse")
