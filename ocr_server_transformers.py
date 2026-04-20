@@ -363,6 +363,23 @@ def match_targets_from_views(
     return matched
 
 
+def filter_watermark_boxes(boxes, image_size):
+    """
+    Remove boxes in the bottom-right watermark zone.
+    Watermark "场馆预约" is in the bottom-right corner.
+    Filter condition: box right >= 75% width AND box bottom >= 85% height
+    """
+    if not boxes:
+        return boxes
+    width, height = image_size
+    threshold_x = 0.75
+    threshold_y = 0.85
+    return [
+        box for box in boxes
+        if not (box[2] >= width * threshold_x and box[3] >= height * threshold_y)
+    ]
+
+
 @contextmanager
 def temporary_image_file(image_bytes: bytes):
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:

@@ -483,5 +483,30 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertIsNone(response["model_path"])
 
 
+def test_filter_watermark_boxes_excludes_bottom_right():
+    from ocr_server_transformers import filter_watermark_boxes
+    boxes = [
+        [10, 10, 50, 60],   # top-left, keep
+        [100, 20, 140, 70], # top-right, keep
+        [20, 100, 60, 140], # bottom-left, keep
+        [300, 280, 340, 310], # bottom-right watermark zone, remove
+    ]
+    image_size = (400, 300)
+    filtered = filter_watermark_boxes(boxes, image_size)
+    assert len(filtered) == 3
+    assert [300, 280, 340, 310] not in filtered
+
+def test_filter_watermark_boxes_preserves_edge_boxes():
+    from ocr_server_transformers import filter_watermark_boxes
+    boxes = [
+        [10, 10, 50, 60],   # top-left, keep
+        [320, 30, 360, 80], # x>80% but y<85%, keep
+        [20, 270, 60, 290], # y>85% but x<80%, keep
+    ]
+    image_size = (400, 300)
+    filtered = filter_watermark_boxes(boxes, image_size)
+    assert len(filtered) == 3
+
+
 if __name__ == "__main__":
     unittest.main()
