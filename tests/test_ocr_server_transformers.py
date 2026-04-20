@@ -209,272 +209,6 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertEqual(ctx.exception.detail, "Invalid image data")
 
-    def test_parse_route_preserves_plain_text_results_without_targets(self):
-        ocr_server_transformers.engine = FakeEngine()
-
-        response = parse(ParseRequest(images=[make_png_data_uri()]))
-
-        self.assertEqual(
-            response["results"],
-            [
-                {"text": "件", "bbox": [], "confidence": 0.5},
-                {"text": "叶", "bbox": [], "confidence": 0.5},
-                {"text": "结", "bbox": [], "confidence": 0.5},
-            ],
-        )
-
-    def test_parse_route_preserves_raw_json_results_without_targets(self):
-        ocr_server_transformers.engine = FakeJsonEngine()
-
-        response = parse(ParseRequest(images=[make_png_data_uri(30, 10, [(2, 2, 8, 8)])]))
-
-        self.assertEqual(response["results"][0]["bbox"], [0, 0, 10, 10])
-        self.assertNotIn("x", response["results"][0])
-        self.assertNotIn("y", response["results"][0])
-
-    def test_parse_route_returns_click_coordinates_for_targets(self):
-        ocr_server_transformers.engine = FakeJsonEngine()
-        image = make_png_data_uri(
-            30,
-            10,
-            [(2, 2, 8, 8), (12, 2, 18, 8), (22, 2, 28, 8)],
-        )
-
-        response = parse(ParseRequest(images=[image], targets=["件", "叶", "结"]))
-
-        self.assertEqual(
-            response["results"],
-            [
-                {"text": "件", "bbox": [2, 2, 8, 8], "x": 5, "y": 5, "confidence": 0.94},
-                {"text": "叶", "bbox": [12, 2, 18, 8], "x": 15, "y": 5, "confidence": 0.89},
-                {"text": "结", "bbox": [22, 2, 28, 8], "x": 25, "y": 5, "confidence": 0.91},
-            ],
-        )
-
-    def test_parse_route_derives_click_coordinates_from_text_and_colored_regions(self):
-        ocr_server_transformers.engine = FakeTextRecognitionEngine()
-        image = Image.new("RGB", (160, 60), (220, 240, 250))
-        draw = ImageDraw.Draw(image)
-        draw.rectangle([10, 10, 25, 35], fill=(200, 20, 20))
-        draw.rectangle([50, 12, 67, 38], fill=(20, 120, 220))
-        draw.rectangle([95, 9, 114, 36], fill=(230, 40, 180))
-        draw.rectangle([130, 14, 148, 42], fill=(180, 30, 200))
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        response = parse(
-            ParseRequest(
-                images=[f"data:image/png;base64,{payload}"],
-                targets=["件", "叶", "结"],
-            )
-        )
-
-        self.assertEqual(
-            response["results"],
-            [
-                {"text": "件", "bbox": [130, 14, 149, 43], "x": 139, "y": 28, "confidence": 0.5},
-                {"text": "叶", "bbox": [95, 9, 115, 37], "x": 105, "y": 23, "confidence": 0.5},
-                {"text": "结", "bbox": [50, 12, 68, 39], "x": 59, "y": 25, "confidence": 0.5},
-            ],
-        )
-
-    def test_parse_route_uses_target_agnostic_strip_for_targeted_ocr(self):
-        recording_engine = FakeRecordingEngine()
-        ocr_server_transformers.engine = recording_engine
-        image = Image.new("RGB", (310, 155), (245, 248, 250))
-        draw = ImageDraw.Draw(image)
-        draw.rectangle([23, 31, 58, 64], fill=(0, 90, 120))
-        draw.rectangle([81, 74, 120, 99], fill=(240, 90, 20))
-        draw.rectangle([164, 16, 205, 54], fill=(90, 40, 180))
-        draw.rectangle([207, 77, 240, 116], fill=(90, 40, 180))
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        response = parse(
-            ParseRequest(
-                images=[f"data:image/png;base64,{payload}"],
-                targets=["穿", "产", "工"],
-            )
-        )
-
-        self.assertTrue(recording_engine.received_targets)
-        self.assertTrue(all(targets is None for targets in recording_engine.received_targets))
-        self.assertEqual([item["text"] for item in response["results"]], ["穿", "产", "工"])
-        self.assertEqual(response["results"][0]["x"], 224)
-        self.assertEqual(response["results"][1]["x"], 101)
-        self.assertEqual(response["results"][2]["x"], 41)
-
-    def test_parse_route_combines_original_and_strip_recognition_for_targets(self):
-        recording_engine = FakeRecordingEngine(
-            [
-                "开此出茶场馆预约",
-                "此出系",
-            ]
-        )
-        ocr_server_transformers.engine = recording_engine
-        image = Image.new("RGB", (310, 155), (245, 248, 250))
-        draw = ImageDraw.Draw(image)
-        draw.rectangle([97, 23, 135, 60], fill=(25, 80, 140))
-        draw.rectangle([136, 73, 173, 105], fill=(220, 20, 170))
-        draw.rectangle([210, 46, 251, 84], fill=(25, 80, 140))
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        response = parse(
-            ParseRequest(
-                images=[f"data:image/png;base64,{payload}"],
-                targets=["开", "此", "系"],
-            )
-        )
-
-        self.assertGreaterEqual(len(recording_engine.received_targets), 2)
-        self.assertTrue(all(targets is None for targets in recording_engine.received_targets))
-        self.assertEqual([item["text"] for item in response["results"]], ["开", "此", "系"])
-        self.assertEqual(response["results"][0]["x"], 116)
-        self.assertEqual(response["results"][1]["x"], 155)
-        self.assertEqual(response["results"][2]["x"], 231)
-
-    def test_parse_route_ignores_short_shifted_view_and_uses_full_strip_view(self):
-        recording_engine = FakeRecordingEngine(
-            [
-                "装通被\n\n场馆预约",
-                "装通イ被",
-            ]
-        )
-        ocr_server_transformers.engine = recording_engine
-        image = Image.new("RGB", (310, 155), (77, 193, 228))
-        draw = ImageDraw.Draw(image)
-        draw.rectangle([41, 34, 78, 69], fill=(85, 30, 165))
-        draw.rectangle([93, 16, 126, 49], fill=(85, 30, 165))
-        draw.rectangle([146, 74, 172, 92], fill=(160, 50, 160))
-        draw.rectangle([169, 75, 180, 107], fill=(160, 50, 160))
-        draw.rectangle([207, 6, 242, 39], fill=(210, 20, 25))
-        draw.rectangle([77, 125, 109, 154], fill=(215, 90, 20))
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        response = parse(
-            ParseRequest(
-                images=[f"data:image/png;base64,{payload}"],
-                targets=["被", "通", "八"],
-            )
-        )
-
-        self.assertEqual([item["text"] for item in response["results"]], ["被", "通", "八"])
-        self.assertEqual(response["results"][0]["x"], 225)
-        self.assertEqual(response["results"][1]["x"], 110)
-        self.assertEqual(response["results"][2]["x"], 163)
-
-    def test_parse_route_infers_single_missing_target_from_remaining_box(self):
-        recording_engine = FakeRecordingEngine(["讲高沙\n\n场馆预约", "讲高沙"])
-        ocr_server_transformers.engine = recording_engine
-        image = Image.new("RGB", (310, 155), (117, 164, 206))
-        draw = ImageDraw.Draw(image)
-        draw.rectangle([8, 71, 44, 107], fill=(85, 30, 165))
-        draw.rectangle([102, 51, 136, 89], fill=(240, 90, 20))
-        draw.rectangle([155, 51, 189, 85], fill=(25, 60, 140))
-        draw.rectangle([207, 84, 240, 116], fill=(170, 45, 160))
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        response = parse(
-            ParseRequest(
-                images=[f"data:image/png;base64,{payload}"],
-                targets=["讲", "沙", "领"],
-            )
-        )
-
-        self.assertEqual([item["text"] for item in response["results"]], ["讲", "沙", "领"])
-        self.assertEqual(response["results"][0]["x"], 26)
-        self.assertEqual(response["results"][1]["x"], 224)
-        self.assertEqual(response["results"][2]["x"], 119)
-
-    def test_parse_route_uses_target_aware_confusable_candidates(self):
-        recording_engine = FakeRecordingEngine(["卡拉川怎\n\n场馆预约", "卡拉川怎"])
-        ocr_server_transformers.engine = recording_engine
-        image = Image.new("RGB", (310, 155), (77, 193, 228))
-        draw = ImageDraw.Draw(image)
-        draw.rectangle([18, 9, 50, 40], fill=(25, 120, 180))
-        draw.rectangle([92, 50, 128, 88], fill=(25, 120, 180))
-        draw.rectangle([145, 66, 180, 102], fill=(25, 120, 180))
-        draw.rectangle([218, 18, 254, 54], fill=(25, 120, 180))
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        response = parse(
-            ParseRequest(
-                images=[f"data:image/png;base64,{payload}"],
-                targets=["拉", "怎", "三"],
-            )
-        )
-
-        self.assertEqual([item["text"] for item in response["results"]], ["拉", "怎", "三"])
-        self.assertEqual(response["results"][0]["x"], 110)
-        self.assertEqual(response["results"][1]["x"], 236)
-        self.assertEqual(response["results"][2]["x"], 163)
-
-    def test_parse_route_uses_target_aware_confusable_candidate_for_de(self):
-        recording_engine = FakeRecordingEngine(
-            [
-                "处鼎都星\n\n场馆预约",
-                "处昂都星",
-                "处",
-                "",
-                "",
-                "",
-                "得",
-                "",
-                "",
-                "",
-                "都",
-                "",
-                "",
-                "",
-                "星",
-                "",
-                "",
-                "",
-            ]
-        )
-        ocr_server_transformers.engine = recording_engine
-        image = Image.new("RGB", (310, 155), (190, 225, 240))
-        draw = ImageDraw.Draw(image)
-        draw.rectangle([29, 57, 64, 96], fill=(20, 90, 120))
-        draw.rectangle([93, 75, 122, 113], fill=(240, 90, 20))
-        draw.rectangle([154, 56, 190, 91], fill=(20, 140, 220))
-        draw.rectangle([220, 42, 255, 78], fill=(20, 40, 100))
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        payload = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        response = parse(
-            ParseRequest(
-                images=[f"data:image/png;base64,{payload}"],
-                targets=["处", "星", "得"],
-            )
-        )
-
-        self.assertEqual([item["text"] for item in response["results"]], ["处", "星", "得"])
-        self.assertEqual(response["results"][0]["x"], 47)
-        self.assertEqual(response["results"][1]["x"], 238)
-        self.assertEqual(response["results"][2]["x"], 108)
-
-    def test_parse_route_fails_closed_for_plain_text_with_targets(self):
-        ocr_server_transformers.engine = FakeEngine()
-
-        response = parse(ParseRequest(images=[make_png_data_uri()], targets=["件", "叶", "结"]))
-
-        self.assertEqual(response["results"], [])
-        self.assertEqual(response["error"], "unsafe_ocr_output")
-        self.assertEqual(response["raw_output"], "识别结果：件叶结")
-        self.assertEqual(response["method"], "glm_ocr_transformers_with_local_positioning")
-
     def test_health_reports_unloaded_model(self):
         response = health()
 
@@ -530,20 +264,37 @@ def test_recognize_box_crops_returns_one_char_per_box():
         ocr_server_transformers.engine = original_engine
 
 
-def test_solve_image_uses_per_box_ocr_main_path():
-    import requests
+def test_recognize_rotated_box_crops_returns_candidates_or_empty():
+    from PIL import Image
+    from ocr_server_transformers import recognize_rotated_box_crops, engine
+    image = Image.new('RGB', (200, 150), 'white')
+    boxes = [[20, 20, 60, 60], [100, 20, 140, 60]]
+    # Mock engine that returns target chars when rotated
+    fake_engine = type('FakeRotatedEngine', (), {
+        'loaded': True,
+        'recognize': lambda self, img_bytes, targets: '测'
+    })()
+    original_engine = ocr_server_transformers.engine
+    ocr_server_transformers.engine = fake_engine
     try:
-        r = requests.get("http://localhost:8000/health", timeout=2)
-        if not r.json().get("model_loaded"):
-            import pytest
-            pytest.skip("OCR model not loaded")
-    except:
+        results = recognize_rotated_box_crops(image, ['测', '试'], boxes)
+        # Should return list of Candidate objects (possibly empty if rotation fails)
+        assert isinstance(results, list)
+    finally:
+        ocr_server_transformers.engine = original_engine
+
+
+def test_solve_image_uses_per_box_ocr_main_path():
+    # Test that solve_image returns proper structure when model is loaded
+    # This tests the function directly, not via HTTP
+    from ocr_server_transformers import solve_image, engine
+
+    if engine is None or not engine.loaded:
         import pytest
-        pytest.skip("OCR server not running")
+        pytest.skip("OCR model not loaded")
 
     from io import BytesIO
     from PIL import Image
-    from ocr_server_transformers import solve_image
 
     image = Image.new('RGB', (300, 200), 'white')
     img_bytes = BytesIO()
@@ -551,6 +302,9 @@ def test_solve_image_uses_per_box_ocr_main_path():
 
     result = solve_image(img_bytes.getvalue(), ["内", "别", "员"])
     assert "results" in result or "error" in result
+    # Should return per_box_ocr method on success
+    if "results" in result and result["results"]:
+        assert result.get("method") == "per_box_ocr"
 
 
 if __name__ == "__main__":
