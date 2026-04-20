@@ -508,5 +508,27 @@ def test_filter_watermark_boxes_preserves_edge_boxes():
     assert len(filtered) == 3
 
 
+def test_recognize_box_crops_returns_one_char_per_box():
+    from PIL import Image
+    from ocr_server_transformers import recognize_box_crops, engine
+    image = Image.new('RGB', (200, 150), 'white')
+    boxes = [[20, 20, 60, 60]]
+    # Mock engine with a fake that returns a single Chinese character
+    fake_engine = type('FakeBoxCropEngine', (), {
+        'loaded': True,
+        'recognize': lambda self, img_bytes, targets: '测'
+    })()
+    original_engine = ocr_server_transformers.engine
+    ocr_server_transformers.engine = fake_engine
+    try:
+        results = recognize_box_crops(image, boxes)
+        assert isinstance(results, list)
+        assert len(results) == 1
+        assert results[0]['text'] == '测'
+        assert results[0]['bbox'] == [20, 20, 60, 60]
+    finally:
+        ocr_server_transformers.engine = original_engine
+
+
 if __name__ == "__main__":
     unittest.main()

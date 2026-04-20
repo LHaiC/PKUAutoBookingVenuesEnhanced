@@ -332,6 +332,35 @@ def recognize_rotated_box_candidates(
     return candidates
 
 
+def recognize_box_crops(image, boxes):
+    """
+    Recognize each box region individually via GLM.
+
+    Returns: list of dicts [{"text": char, "bbox": [x1,y1,x2,y2]}, ...]
+            Returns empty list if any box fails to produce exactly 1 character.
+    """
+    if not boxes or engine is None or not engine.loaded:
+        return []
+
+    results = []
+    for box in boxes:
+        crop = crop_box_image(image, box, padding=5)
+        crop_bytes = image_to_png_bytes(crop)
+        output = engine.recognize(crop_bytes, None)
+
+        chars = re.findall(r"[\u4e00-\u9fff]", output.replace("<|user|>", "").strip())
+        if len(chars) != 1:
+            return []  # fail: not exactly one Chinese char
+
+        results.append({
+            "text": chars[0],
+            "bbox": box,
+            "confidence": 0.80,
+        })
+
+    return results
+
+
 def match_targets_from_views(
     targets: list[str],
     candidate_views: list[list],
