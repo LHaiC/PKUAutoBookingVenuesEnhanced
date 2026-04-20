@@ -384,13 +384,27 @@ def recognize_rotated_box_crops(image, targets, boxes):
                 best_char = chars[0]
                 break
         if best_char:
-            from captcha_matcher import Candidate
             candidates.append(Candidate(
                 text=best_char,
                 bbox=box,
                 confidence=0.80,
             ))
         else:
+            # Special case: 三/川 confusion - check raw output for "111"
+            if "三" in target_set and "川" not in target_set:
+                crop = crop_box_image(image, box, padding=5)
+                raw_text = ""
+                for angle in (0, 90, 180, 270):
+                    rotated = crop.rotate(angle, expand=True, fillcolor="white")
+                    rotated_bytes = image_to_png_bytes(rotated)
+                    raw_text += engine.recognize(rotated_bytes, None)
+                if "111" in raw_text:
+                    candidates.append(Candidate(
+                        text="三",
+                        bbox=box,
+                        confidence=0.50,
+                    ))
+                    continue
             return []  # fail whole fallback
     return candidates
 
