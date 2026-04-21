@@ -10,10 +10,14 @@ from fastapi import HTTPException
 from PIL import Image
 
 import ocr_server_transformers
+from captcha_matcher import Candidate
+from captcha_vision import ProposalSet
 from ocr_server_transformers import (
     ParseRequest,
+    accept_solution,
     health,
     parse,
+    score_proposal_set,
 )
 
 
@@ -88,6 +92,43 @@ class RecognizerUnitTests(unittest.TestCase):
         boxes = [[20, 20, 60, 60]]
         results = ocr_server_transformers.recognize_box_crops(image, boxes, ["件", "叶", "结"])
         self.assertEqual(results, [])
+
+
+class OcrServerTransformerTests(unittest.TestCase):
+    def test_score_proposal_set_prefers_full_target_coverage(self):
+        image = Image.new("RGB", (160, 60), "white")
+        proposal_good = ProposalSet(
+            boxes=[[10, 10, 30, 30], [50, 10, 70, 30], [90, 10, 110, 30]],
+            source="uniform_color_regions",
+            preprocess_variant="whitened",
+        )
+        proposal_bad = ProposalSet(
+            boxes=[[10, 10, 60, 35], [90, 10, 110, 30]],
+            source="dark_regions",
+            preprocess_variant="whitened",
+        )
+        good_candidates = [
+            Candidate("今", proposal_good.boxes[0], 0.90),
+            Candidate("入", proposal_good.boxes[1], 0.88),
+            Candidate("心", proposal_good.boxes[2], 0.92),
+        ]
+        bad_candidates = [
+            Candidate("今", proposal_bad.boxes[0], 0.55),
+            Candidate("心", proposal_bad.boxes[1], 0.60),
+        ]
+
+        self.assertGreater(
+            score_proposal_set(image, proposal_good, ["今", "入", "心"], good_candidates)["score"],
+            score_proposal_set(image, proposal_bad, ["今", "入", "心"], bad_candidates)["score"],
+        )
+
+    def test_accept_solution_rejects_ambiguous_top_scores(self):
+        accepted, reason = accept_solution(
+            top_score={"score": 0.92, "matched": [{"text": "今"}, {"text": "入"}, {"text": "心"}]},
+            runner_up_score={"score": 0.91, "matched": [{"text": "今"}, {"text": "入"}, {"text": "心"}]},
+        )
+        self.assertFalse(accepted)
+        self.assertEqual(reason, "ambiguous_top_score")
 
 
 if __name__ == "__main__":

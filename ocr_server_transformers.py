@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 
 from PIL import Image
 
-from captcha_matcher import Candidate
+from captcha_matcher import Candidate, match_targets
+from captcha_vision import ProposalSet, measure_box_size_consistency
 
 app = FastAPI()
 engine = None
@@ -73,6 +74,43 @@ def recognize_box_crops(image: Image.Image, boxes: list[list[int]], targets: lis
             return []
         results.append(candidate)
     return results
+
+
+def score_proposal_set(
+    image: Image.Image,
+    proposal: ProposalSet,
+    targets: list[str],
+    candidates: list[Candidate],
+) -> dict:
+    size_stats = measure_box_size_consistency([candidate.bbox for candidate in candidates])
+    try:
+        matched = match_targets(targets, candidates, image.size, min_confidence=0.45)
+        coverage = len(matched)
+    except Exception:
+        matched = []
+        coverage = 0
+    score = (
+        coverage * 10.0
+        + sum(candidate.confidence for candidate in candidates)
+        + size_stats["score"] * 2.0
+        - max(0, len(proposal.boxes) - 3)
+    )
+    return {"score": score, "matched": matched, "size_stats": size_stats, "proposal": proposal}
+
+
+def accept_solution(
+    top_score: dict,
+    runner_up_score: dict | None,
+    min_margin: float = 0.25,
+) -> tuple[bool, str]:
+    matched = top_score.get("matched", [])
+    if len(matched) != 3:
+        return False, "incomplete_target_coverage"
+    if runner_up_score is not None and top_score["score"] - runner_up_score["score"] < min_margin:
+        return False, "ambiguous_top_score"
+    if len({tuple(item["bbox"]) for item in matched}) != len(matched):
+        return False, "duplicate_box_reuse"
+    return True, "accepted"
 
 
 def health():
