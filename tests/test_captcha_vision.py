@@ -14,7 +14,9 @@ from captcha_vision import (
     detect_colored_text_bboxes,
     detect_dark_regions,
     filter_captcha_text_bboxes,
+    generate_box_proposals,
     image_size,
+    measure_box_size_consistency,
     refine_bbox_to_dark_pixels,
     validate_bbox,
 )
@@ -82,6 +84,26 @@ class CaptchaVisionTests(unittest.TestCase):
             detect_colored_text_bboxes(img),
             [[10, 10, 26, 36], [50, 12, 68, 39], [95, 9, 115, 37]],
         )
+
+    def test_generate_box_proposals_returns_multiple_variants(self):
+        img = Image.new("RGB", (160, 60), (220, 240, 250))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([10, 10, 25, 35], fill=(200, 20, 20))
+        draw.rectangle([50, 12, 67, 38], fill=(20, 120, 220))
+        draw.rectangle([95, 9, 114, 36], fill=(230, 40, 180))
+
+        proposals = generate_box_proposals(img)
+
+        self.assertGreaterEqual(len(proposals), 3)
+        self.assertTrue(all(len(item.boxes) >= 3 for item in proposals))
+
+    def test_box_size_consistency_flags_outlier_box(self):
+        boxes = [[10, 10, 40, 40], [60, 10, 90, 40], [95, 8, 150, 55]]
+
+        stats = measure_box_size_consistency(boxes)
+
+        self.assertLess(stats["score"], 0.5)
+        self.assertEqual(stats["outlier_index"], 2)
 
     def test_build_colored_text_strip_normalizes_regions_left_to_right(self):
         img = Image.new("RGB", (160, 80), (220, 240, 250))
