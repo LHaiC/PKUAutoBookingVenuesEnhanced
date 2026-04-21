@@ -33,6 +33,22 @@ def make_png_data_uri(
     return f"data:image/png;base64,{payload}"
 
 
+class FakeEngine:
+    loaded = True
+    model_path = "fake-model"
+
+    def recognize(self, _image_bytes):
+        return "识别结果：件"
+
+
+class FakeMultiCharEngine:
+    loaded = True
+    model_path = "fake-model"
+
+    def recognize(self, _image_bytes):
+        return "识别结果：件叶结"
+
+
 class OcrServerTransformerRouteTests(unittest.TestCase):
     def setUp(self):
         self.original_engine = ocr_server_transformers.engine
@@ -52,6 +68,26 @@ class OcrServerTransformerRouteTests(unittest.TestCase):
         self.assertEqual(response["status"], "ok")
         self.assertFalse(response["model_loaded"])
         self.assertIsNone(response["model_path"])
+
+
+class RecognizerUnitTests(unittest.TestCase):
+    def tearDown(self):
+        ocr_server_transformers.engine = None
+
+    def test_recognize_box_crops_returns_one_char_per_box(self):
+        ocr_server_transformers.engine = FakeEngine()
+        image = Image.new("RGB", (200, 150), "white")
+        boxes = [[20, 20, 60, 60]]
+        results = ocr_server_transformers.recognize_box_crops(image, boxes, None)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].text, "件")
+
+    def test_recognize_box_crops_returns_empty_on_multi_char_output(self):
+        ocr_server_transformers.engine = FakeMultiCharEngine()
+        image = Image.new("RGB", (200, 150), "white")
+        boxes = [[20, 20, 60, 60]]
+        results = ocr_server_transformers.recognize_box_crops(image, boxes, ["件", "叶", "结"])
+        self.assertEqual(results, [])
 
 
 if __name__ == "__main__":
