@@ -231,6 +231,29 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(body["results"], [])
         self.assertIn(body["error"], {"ambiguous_top_score", "incomplete_target_coverage"})
 
+    def test_parse_route_recovers_failed_box_with_rotated_fallback(self):
+        engine = FakeRecordingEngine(outputs=["今", "今入", "心", "今入", "入"])
+        ocr_server_transformers.engine = engine
+        payload = make_png_data_uri(width=160, height=60)
+        proposals = [
+            ProposalSet(
+                boxes=[[10, 10, 30, 30], [50, 10, 70, 30], [90, 10, 110, 30]],
+                source="uniform_color_regions",
+                preprocess_variant="whitened",
+            )
+        ]
+
+        with patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals):
+            response = self.post_json(
+                "/glmocr/parse",
+                {"images": [payload], "targets": ["今", "入", "心"]},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual([item["text"] for item in body["results"]], ["今", "入", "心"])
+        self.assertEqual(len(engine.calls), 5)
+
 
 if __name__ == "__main__":
     unittest.main()

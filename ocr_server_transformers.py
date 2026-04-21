@@ -76,6 +76,23 @@ def recognize_box_crops(image: Image.Image, boxes: list[list[int]], targets: lis
     return results
 
 
+def recognize_box_candidates_with_recovery(
+    image: Image.Image,
+    boxes: list[list[int]],
+    targets: list[str] | None,
+) -> tuple[list[Candidate], list[list[int]]]:
+    target_set = set(targets) if targets else None
+    candidates = []
+    failed_boxes = []
+    for box in boxes:
+        candidate = recognize_box_crop(image, box, target_set)
+        if candidate is None:
+            failed_boxes.append(box)
+            continue
+        candidates.append(candidate)
+    return candidates, failed_boxes
+
+
 def recognize_rotated_box_candidates(
     image: Image.Image,
     targets: list[str],
@@ -139,15 +156,15 @@ def solve_image(image: Image.Image, targets: list[str]) -> dict:
     for proposal in proposals:
         if not (3 <= len(proposal.boxes) <= 6):
             continue
-        candidates = recognize_box_crops(image, proposal.boxes, targets)
-        if not candidates:
-            candidates = recognize_rotated_box_candidates(image, targets, proposal.boxes)
+        candidates, failed_boxes = recognize_box_candidates_with_recovery(image, proposal.boxes, targets)
+        if failed_boxes:
+            candidates.extend(recognize_rotated_box_candidates(image, targets, failed_boxes))
         scored.append(score_proposal_set(image, proposal, targets, candidates))
 
     scored.sort(key=lambda item: item["score"], reverse=True)
     top = scored[0] if scored else {"score": 0.0, "matched": []}
     runner_up = scored[1] if len(scored) > 1 else None
-    accepted, reason = accept_solution(top, runner_up)
+    accepted, reason = accept_solution(top, runner_up, expected_match_count=len(targets))
     if not accepted:
         return {
             "results": [],
