@@ -3,7 +3,6 @@
 End-to-end OCR test suite for captcha samples.
 
 This module tests the full OCR pipeline on captcha samples with known targets.
-It replaces the old bash-based test_ocr_samples.sh script.
 
 Test samples are stored in tests/samples/ with descriptive names:
 - captcha_sample_001_<targets>_YYYYMMDD.png
@@ -23,6 +22,7 @@ import sys
 import unittest
 from pathlib import Path
 
+import pytest
 import requests
 from PIL import Image, ImageDraw
 
@@ -93,29 +93,27 @@ def get_ocr_result(image: Image.Image, targets: list[str] | None = None) -> dict
 
 
 def check_server_ready() -> bool:
-    """Check if OCR server is running and model is loaded."""
+    """Check if the OCR server is reachable and ready to serve sample tests."""
     try:
         resp = _local_session().get(HEALTH_ENDPOINT, timeout=5)
         result = resp.json()
-        # PaddleOCR server: {"status":"ok","model":"paddleocr"}
-        # GLM server: {"status":"ok","model":"glm-ocr","model_loaded":true}
         if "model_loaded" in result:
             return result.get("model_loaded", False)
-        # PaddleOCR health format - status ok means ready
         return result.get("status") == "ok"
     except requests.RequestException:
         return False
 
 
 def test_health_endpoint_is_glm_server():
-    response = _local_session().get(HEALTH_ENDPOINT, timeout=5)
+    """Validate the GLM health endpoint when localhost is reachable."""
+    try:
+        response = _local_session().get(HEALTH_ENDPOINT, timeout=5)
+    except requests.RequestException as exc:
+        pytest.skip(f"OCR server not reachable at {HEALTH_ENDPOINT}: {exc}")
     response.raise_for_status()
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["model"] in {"glm-ocr", "glm_ocr_transformers"}
-
-
-# PaddleOCR handles detection+recognition natively; no rule-based box detection needed.
 
 
 class TestOCRSamplesE2E(unittest.TestCase):

@@ -1,11 +1,13 @@
 #!/bin/bash
 set -e
-cd /home/hcliu/projects/PKUAutoBookingVenues
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 python3 -c "
 import base64, requests
 from PIL import Image, ImageDraw
 import io
+import sys
 
 session = requests.Session()
 session.trust_env = False
@@ -19,10 +21,11 @@ samples = [
     ('captcha-20260420-172843-935131.png', ['长', '方', '科']),
 ]
 
+failures = 0
+
 for fname, targets in samples:
     img = Image.open(f'models/captcha_failures/{fname}')
     draw = ImageDraw.Draw(img)
-    W, H = img.size
 
     buf = io.BytesIO()
     img.save(buf, format='PNG')
@@ -61,4 +64,11 @@ for fname, targets in samples:
     img.save(f'ocr_debug_{fname}')
     print(f'  -> {status}')
     print()
+
+    if status != 'PASS':
+        failures += 1
+
+if failures:
+    print(f'Offline OCR regression failed: {failures} sample(s) reported FAIL')
+    sys.exit(1)
 "
