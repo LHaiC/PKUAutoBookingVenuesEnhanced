@@ -483,7 +483,7 @@ def prepare_captcha_boxes(image: Image.Image, refine: bool = True) -> list[list[
 def generate_box_proposals(image: Image.Image) -> list[ProposalSet]:
     whitened = whiten_watermark(image)
     uniform = detect_colored_text_bboxes(whitened)
-    dark = filter_captcha_text_bboxes(detect_dark_regions(whitened, threshold=180), whitened.size)
+    dark = filter_captcha_text_bboxes(detect_dark_regions(whitened), whitened.size)
     padded = filter_captcha_text_bboxes(
         detect_colored_text_bboxes(ImageOps.expand(whitened, border=2, fill="white")),
         None,
