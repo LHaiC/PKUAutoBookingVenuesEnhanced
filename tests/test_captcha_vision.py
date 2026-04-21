@@ -93,9 +93,32 @@ class CaptchaVisionTests(unittest.TestCase):
         draw.rectangle([95, 9, 114, 36], fill=(230, 40, 180))
 
         proposals = generate_box_proposals(img)
+        proposal_map = {
+            (proposal.source, proposal.preprocess_variant): proposal.boxes
+            for proposal in proposals
+        }
 
-        self.assertGreaterEqual(len(proposals), 3)
+        self.assertEqual(
+            [(proposal.source, proposal.preprocess_variant) for proposal in proposals],
+            [
+                ("uniform_color_regions", "whitened"),
+                ("dark_regions", "whitened"),
+                ("uniform_color_regions", "whitened_padded"),
+            ],
+        )
         self.assertTrue(all(len(item.boxes) >= 3 for item in proposals))
+        self.assertEqual(
+            proposal_map[("uniform_color_regions", "whitened")],
+            [[10, 10, 26, 36], [50, 12, 68, 39], [95, 9, 115, 37]],
+        )
+        self.assertEqual(
+            proposal_map[("dark_regions", "whitened")],
+            [[10, 10, 26, 36], [50, 12, 68, 39], [95, 9, 115, 37]],
+        )
+        self.assertEqual(
+            proposal_map[("uniform_color_regions", "whitened_padded")],
+            [[10, 10, 26, 36], [50, 12, 68, 39], [95, 9, 115, 37]],
+        )
 
     def test_box_size_consistency_flags_outlier_box(self):
         boxes = [[10, 10, 40, 40], [60, 10, 90, 40], [95, 8, 150, 55]]

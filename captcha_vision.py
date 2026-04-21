@@ -480,14 +480,20 @@ def prepare_captcha_boxes(image: Image.Image, refine: bool = True) -> list[list[
     return [refine_bbox_to_dark_pixels(image, box) for box in boxes]
 
 
+def _translate_boxes(boxes: list[list[int]], dx: int = 0, dy: int = 0) -> list[list[int]]:
+    return [[x1 + dx, y1 + dy, x2 + dx, y2 + dy] for x1, y1, x2, y2 in boxes]
+
+
 def generate_box_proposals(image: Image.Image) -> list[ProposalSet]:
     whitened = whiten_watermark(image)
     uniform = detect_colored_text_bboxes(whitened)
     dark = filter_captcha_text_bboxes(detect_dark_regions(whitened), whitened.size)
+    padded_border = 2
     padded = filter_captcha_text_bboxes(
-        detect_colored_text_bboxes(ImageOps.expand(whitened, border=2, fill="white")),
+        detect_colored_text_bboxes(ImageOps.expand(whitened, border=padded_border, fill="white")),
         None,
     )
+    padded = _translate_boxes(padded, dx=-padded_border, dy=-padded_border)
     return [
         ProposalSet(boxes=uniform, source="uniform_color_regions", preprocess_variant="whitened"),
         ProposalSet(boxes=dark, source="dark_regions", preprocess_variant="whitened"),
