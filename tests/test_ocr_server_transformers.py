@@ -3,6 +3,7 @@ import io
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -53,6 +54,21 @@ class FakeMultiCharEngine:
         return "识别结果：件叶结"
 
 
+class FakeRecordingEngine:
+    loaded = True
+    model_path = "fake-model"
+
+    def __init__(self, outputs: list[str]):
+        self.outputs = list(outputs)
+        self.calls = []
+
+    def recognize(self, image_bytes):
+        self.calls.append(image_bytes)
+        if not self.outputs:
+            raise AssertionError("No fake OCR outputs remaining")
+        return self.outputs.pop(0)
+
+
 class OcrServerTransformerRouteTests(unittest.TestCase):
     def setUp(self):
         self.original_engine = ocr_server_transformers.engine
@@ -95,6 +111,9 @@ class RecognizerUnitTests(unittest.TestCase):
 
 
 class OcrServerTransformerTests(unittest.TestCase):
+    def tearDown(self):
+        ocr_server_transformers.engine = None
+
     def test_score_proposal_set_prefers_full_target_coverage(self):
         image = Image.new("RGB", (160, 60), "white")
         proposal_good = ProposalSet(
@@ -103,32 +122,90 @@ class OcrServerTransformerTests(unittest.TestCase):
             preprocess_variant="whitened",
         )
         proposal_bad = ProposalSet(
-            boxes=[[10, 10, 60, 35], [90, 10, 110, 30]],
+            boxes=[[10, 10, 30, 30], [50, 10, 70, 30]],
             source="dark_regions",
             preprocess_variant="whitened",
         )
         good_candidates = [
-            Candidate("今", proposal_good.boxes[0], 0.90),
-            Candidate("入", proposal_good.boxes[1], 0.88),
-            Candidate("心", proposal_good.boxes[2], 0.92),
+            Candidate("今", proposal_good.boxes[0], 0.60),
+            Candidate("入", proposal_good.boxes[1], 0.60),
+            Candidate("心", proposal_good.boxes[2], 0.60),
         ]
         bad_candidates = [
-            Candidate("今", proposal_bad.boxes[0], 0.55),
-            Candidate("心", proposal_bad.boxes[1], 0.60),
+            Candidate("今", proposal_bad.boxes[0], 0.60),
+            Candidate("入", proposal_bad.boxes[1], 0.60),
         ]
+        good_score = score_proposal_set(image, proposal_good, ["今", "入", "心"], good_candidates)
+        bad_score = score_proposal_set(image, proposal_bad, ["今", "入", "心"], bad_candidates)
 
+        self.assertEqual(len(good_score["matched"]), 3)
+        self.assertEqual(len(bad_score["matched"]), 0)
         self.assertGreater(
-            score_proposal_set(image, proposal_good, ["今", "入", "心"], good_candidates)["score"],
-            score_proposal_set(image, proposal_bad, ["今", "入", "心"], bad_candidates)["score"],
+            good_score["score"],
+            bad_score["score"],
         )
 
     def test_accept_solution_rejects_ambiguous_top_scores(self):
         accepted, reason = accept_solution(
-            top_score={"score": 0.92, "matched": [{"text": "今"}, {"text": "入"}, {"text": "心"}]},
-            runner_up_score={"score": 0.91, "matched": [{"text": "今"}, {"text": "入"}, {"text": "心"}]},
+            top_score={
+                "score": 0.92,
+                "matched": [
+                    {"text": "今", "bbox": [10, 10, 30, 30]},
+                    {"text": "入", "bbox": [50, 10, 70, 30]},
+                    {"text": "心", "bbox": [90, 10, 110, 30]},
+                ],
+            },
+            runner_up_score={
+                "score": 0.91,
+                "matched": [
+                    {"text": "今", "bbox": [12, 10, 32, 30]},
+                    {"text": "入", "bbox": [52, 10, 72, 30]},
+                    {"text": "心", "bbox": [92, 10, 112, 30]},
+                ],
+            },
+            expected_match_count=3,
         )
         self.assertFalse(accepted)
         self.assertEqual(reason, "ambiguous_top_score")
+
+    def test_parse_route_uses_best_proposal_set_for_targets(self):
+        ocr_server_transformers.engine = FakeRecordingEngine(outputs=["今", "入", "心", "今入", "心"])
+        payload = make_png_data_uri(width=160, height=60)
+        proposals = [
+            ProposalSet(
+                boxes=[[10, 10, 30, 30], [50, 10, 70, 30], [90, 10, 110, 30]],
+                source="uniform_color_regions",
+                preprocess_variant="whitened",
+            ),
+            ProposalSet(
+                boxes=[[12, 10, 32, 30], [52, 10, 72, 30]],
+                source="dark_regions",
+                preprocess_variant="whitened",
+            ),
+        ]
+
+        with patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals):
+            response = parse(ParseRequest(images=[payload], targets=["今", "入", "心"]))
+
+        self.assertEqual([item["text"] for item in response["results"]], ["今", "入", "心"])
+        self.assertEqual(response["method"], "glm_ocr_transformers_with_local_positioning")
+
+    def test_parse_route_fails_closed_when_top_solution_is_ambiguous(self):
+        ocr_server_transformers.engine = FakeRecordingEngine(outputs=["今", "入", "心"])
+        payload = make_png_data_uri(width=160, height=60)
+        proposals = [
+            ProposalSet(
+                boxes=[[10, 10, 30, 30], [50, 10, 70, 30], [150, 10, 170, 30]],
+                source="uniform_color_regions",
+                preprocess_variant="whitened",
+            )
+        ]
+
+        with patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals):
+            response = parse(ParseRequest(images=[payload], targets=["今", "入", "心"]))
+
+        self.assertEqual(response["results"], [])
+        self.assertIn(response["error"], {"ambiguous_top_score", "incomplete_target_coverage"})
 
 
 if __name__ == "__main__":

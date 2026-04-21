@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 
 from PIL import Image
 
-from captcha_matcher import Candidate, match_targets
-from captcha_vision import ProposalSet, measure_box_size_consistency
+from captcha_matcher import Candidate, MatchError, match_targets
+from captcha_vision import ProposalSet, generate_box_proposals, measure_box_size_consistency
 
 app = FastAPI()
 engine = None
@@ -76,6 +76,25 @@ def recognize_box_crops(image: Image.Image, boxes: list[list[int]], targets: lis
     return results
 
 
+def recognize_rotated_box_candidates(
+    image: Image.Image,
+    targets: list[str],
+    boxes: list[list[int]],
+    angles: tuple[int, ...] = (0, 90, 180, 270),
+) -> list[Candidate]:
+    target_set = set(targets)
+    recovered = []
+    for box in boxes:
+        crop = crop_box_image(image, box)
+        for angle in angles:
+            rotated = crop.rotate(angle, expand=True, fillcolor="white")
+            chars = parse_model_output(engine.recognize(image_to_png_bytes(rotated)))
+            if len(chars) == 1 and chars[0] in target_set:
+                recovered.append(Candidate(text=chars[0], bbox=box, confidence=0.50))
+                break
+    return recovered
+
+
 def score_proposal_set(
     image: Image.Image,
     proposal: ProposalSet,
@@ -86,7 +105,7 @@ def score_proposal_set(
     try:
         matched = match_targets(targets, candidates, image.size, min_confidence=0.45)
         coverage = len(matched)
-    except Exception:
+    except MatchError:
         matched = []
         coverage = 0
     score = (
@@ -102,15 +121,46 @@ def accept_solution(
     top_score: dict,
     runner_up_score: dict | None,
     min_margin: float = 0.25,
+    expected_match_count: int = 3,
 ) -> tuple[bool, str]:
     matched = top_score.get("matched", [])
-    if len(matched) != 3:
+    if len(matched) != expected_match_count:
         return False, "incomplete_target_coverage"
     if runner_up_score is not None and top_score["score"] - runner_up_score["score"] < min_margin:
         return False, "ambiguous_top_score"
     if len({tuple(item["bbox"]) for item in matched}) != len(matched):
         return False, "duplicate_box_reuse"
     return True, "accepted"
+
+
+def solve_image(image: Image.Image, targets: list[str]) -> dict:
+    proposals = generate_box_proposals(image)
+    scored = []
+    for proposal in proposals:
+        if not (3 <= len(proposal.boxes) <= 6):
+            continue
+        candidates = recognize_box_crops(image, proposal.boxes, targets)
+        if not candidates:
+            candidates = recognize_rotated_box_candidates(image, targets, proposal.boxes)
+        scored.append(score_proposal_set(image, proposal, targets, candidates))
+
+    scored.sort(key=lambda item: item["score"], reverse=True)
+    top = scored[0] if scored else {"score": 0.0, "matched": []}
+    runner_up = scored[1] if len(scored) > 1 else None
+    accepted, reason = accept_solution(top, runner_up)
+    if not accepted:
+        return {
+            "results": [],
+            "error": reason,
+            "method": "glm_ocr_transformers_with_local_positioning",
+            "image_size": list(image.size),
+        }
+    return {
+        "results": top["matched"],
+        "error": "ok",
+        "method": "glm_ocr_transformers_with_local_positioning",
+        "image_size": list(image.size),
+    }
 
 
 def health():
@@ -126,5 +176,13 @@ def health():
 def parse(req: ParseRequest):
     if engine is None or not getattr(engine, "loaded", False):
         raise HTTPException(status_code=503, detail="Model not loaded")
-
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    if not req.images:
+        raise HTTPException(status_code=400, detail="No images provided")
+    image = Image.open(io.BytesIO(decode_data_uri(req.images[0]))).convert("RGB")
+    if req.targets:
+        return solve_image(image, req.targets)
+    return {
+        "results": [],
+        "image_size": list(image.size),
+        "method": "glm_ocr_transformers_with_local_positioning",
+    }
