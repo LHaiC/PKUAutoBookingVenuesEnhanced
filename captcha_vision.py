@@ -59,7 +59,7 @@ def _dark_mask(image: Image.Image, threshold: int = 90) -> list[list[bool]]:
 
 def detect_dark_regions(
     image: Image.Image,
-    threshold: int = 90,
+    threshold: int = 130,
     min_area: int = 20,
 ) -> list[list[int]]:
     mask = _dark_mask(image, threshold=threshold)
