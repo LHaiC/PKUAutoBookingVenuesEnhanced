@@ -5,6 +5,11 @@ from dataclasses import dataclass
 
 from PIL import Image, ImageOps
 
+PRIMARY_PROPOSAL_SOURCE = "uniform_color_regions"
+DARK_PROPOSAL_SOURCE = "dark_regions"
+PRIMARY_PROPOSAL_VARIANT = "whitened"
+PADDED_PROPOSAL_VARIANT = "whitened_padded"
+
 
 @dataclass
 class ProposalSet:
@@ -478,7 +483,7 @@ def prepare_captcha_boxes(image: Image.Image, refine: bool = True) -> list[list[
         (
             proposal
             for proposal in proposals
-            if proposal.source == "uniform_color_regions" and proposal.preprocess_variant == "whitened"
+            if proposal.source == PRIMARY_PROPOSAL_SOURCE and proposal.preprocess_variant == PRIMARY_PROPOSAL_VARIANT
         ),
         proposals[0],
     )
@@ -507,9 +512,11 @@ def _normalize_padded_boxes(
 
         box_width = clipped[2] - clipped[0]
         box_height = clipped[3] - clipped[1]
-        touches_edge = clipped[0] == 0 or clipped[1] == 0 or clipped[2] == width or clipped[3] == height
-        min_width = 14 if touches_edge else 16
-        if box_width < min_width or box_height < 16:
+        touches_horizontal_edge = clipped[0] == 0 or clipped[2] == width
+        touches_vertical_edge = clipped[1] == 0 or clipped[3] == height
+        min_width = 14 if touches_horizontal_edge else 16
+        min_height = 15 if touches_vertical_edge else 16
+        if box_width < min_width or box_height < min_height:
             continue
         normalized.append(clipped)
 
@@ -527,9 +534,9 @@ def generate_box_proposals(image: Image.Image) -> list[ProposalSet]:
         border=padded_border,
     )
     return [
-        ProposalSet(boxes=uniform, source="uniform_color_regions", preprocess_variant="whitened"),
-        ProposalSet(boxes=dark, source="dark_regions", preprocess_variant="whitened"),
-        ProposalSet(boxes=padded, source="uniform_color_regions", preprocess_variant="whitened_padded"),
+        ProposalSet(boxes=uniform, source=PRIMARY_PROPOSAL_SOURCE, preprocess_variant=PRIMARY_PROPOSAL_VARIANT),
+        ProposalSet(boxes=dark, source=DARK_PROPOSAL_SOURCE, preprocess_variant=PRIMARY_PROPOSAL_VARIANT),
+        ProposalSet(boxes=padded, source=PRIMARY_PROPOSAL_SOURCE, preprocess_variant=PADDED_PROPOSAL_VARIANT),
     ]
 
 

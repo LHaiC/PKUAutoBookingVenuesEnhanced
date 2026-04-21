@@ -9,6 +9,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PIL import Image, ImageDraw
 
 from captcha_vision import (
+    DARK_PROPOSAL_SOURCE,
+    PADDED_PROPOSAL_VARIANT,
+    PRIMARY_PROPOSAL_SOURCE,
+    PRIMARY_PROPOSAL_VARIANT,
     bbox_center,
     build_colored_text_strip,
     decode_image,
@@ -104,22 +108,22 @@ class CaptchaVisionTests(unittest.TestCase):
         self.assertEqual(
             [(proposal.source, proposal.preprocess_variant) for proposal in proposals],
             [
-                ("uniform_color_regions", "whitened"),
-                ("dark_regions", "whitened"),
-                ("uniform_color_regions", "whitened_padded"),
+                (PRIMARY_PROPOSAL_SOURCE, PRIMARY_PROPOSAL_VARIANT),
+                (DARK_PROPOSAL_SOURCE, PRIMARY_PROPOSAL_VARIANT),
+                (PRIMARY_PROPOSAL_SOURCE, PADDED_PROPOSAL_VARIANT),
             ],
         )
         self.assertTrue(all(len(item.boxes) >= 3 for item in proposals))
         self.assertEqual(
-            proposal_map[("uniform_color_regions", "whitened")],
+            proposal_map[(PRIMARY_PROPOSAL_SOURCE, PRIMARY_PROPOSAL_VARIANT)],
             [[10, 10, 26, 36], [50, 12, 68, 39], [95, 9, 115, 37]],
         )
         self.assertEqual(
-            proposal_map[("dark_regions", "whitened")],
+            proposal_map[(DARK_PROPOSAL_SOURCE, PRIMARY_PROPOSAL_VARIANT)],
             [[10, 10, 26, 36], [50, 12, 68, 39], [95, 9, 115, 37]],
         )
         self.assertEqual(
-            proposal_map[("uniform_color_regions", "whitened_padded")],
+            proposal_map[(PRIMARY_PROPOSAL_SOURCE, PADDED_PROPOSAL_VARIANT)],
             [[10, 10, 26, 36], [50, 12, 68, 39], [95, 9, 115, 37]],
         )
 
@@ -146,8 +150,26 @@ class CaptchaVisionTests(unittest.TestCase):
 
         expected = [[0, 8, 14, 34], [48, 10, 64, 36], [101, 7, 120, 33]]
         self.assertEqual(
-            proposal_map[("uniform_color_regions", "whitened_padded")],
+            proposal_map[(PRIMARY_PROPOSAL_SOURCE, PADDED_PROPOSAL_VARIANT)],
             expected,
+        )
+
+    def test_generate_box_proposals_normalizes_padded_bottom_edge_boxes(self):
+        img = Image.new("RGB", (120, 50), (220, 240, 250))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([10, 35, 25, 49], fill=(200, 20, 20))
+        draw.rectangle([48, 10, 63, 35], fill=(20, 120, 220))
+        draw.rectangle([101, 7, 119, 32], fill=(230, 40, 180))
+
+        proposals = generate_box_proposals(img)
+        proposal_map = {
+            (proposal.source, proposal.preprocess_variant): proposal.boxes
+            for proposal in proposals
+        }
+
+        self.assertEqual(
+            proposal_map[(PRIMARY_PROPOSAL_SOURCE, PADDED_PROPOSAL_VARIANT)],
+            [[10, 35, 26, 50], [48, 10, 64, 36], [101, 7, 120, 33]],
         )
 
     def test_prepare_captcha_boxes_uses_primary_proposal_metadata(self):
@@ -158,8 +180,12 @@ class CaptchaVisionTests(unittest.TestCase):
         with patch(
             "captcha_vision.generate_box_proposals",
             return_value=[
-                ProposalSet(boxes=secondary, source="dark_regions", preprocess_variant="whitened"),
-                ProposalSet(boxes=primary, source="uniform_color_regions", preprocess_variant="whitened"),
+                ProposalSet(boxes=secondary, source=DARK_PROPOSAL_SOURCE, preprocess_variant=PRIMARY_PROPOSAL_VARIANT),
+                ProposalSet(
+                    boxes=primary,
+                    source=PRIMARY_PROPOSAL_SOURCE,
+                    preprocess_variant=PRIMARY_PROPOSAL_VARIANT,
+                ),
             ],
         ):
             self.assertEqual(prepare_captcha_boxes(img, refine=False), primary)
