@@ -2,6 +2,7 @@ import io
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -17,6 +18,8 @@ from captcha_vision import (
     generate_box_proposals,
     image_size,
     measure_box_size_consistency,
+    prepare_captcha_boxes,
+    ProposalSet,
     refine_bbox_to_dark_pixels,
     validate_bbox,
 )
@@ -127,6 +130,39 @@ class CaptchaVisionTests(unittest.TestCase):
 
         self.assertLess(stats["score"], 0.5)
         self.assertEqual(stats["outlier_index"], 2)
+
+    def test_generate_box_proposals_normalizes_padded_edge_boxes(self):
+        img = Image.new("RGB", (120, 50), (220, 240, 250))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([0, 8, 13, 33], fill=(200, 20, 20))
+        draw.rectangle([48, 10, 63, 35], fill=(20, 120, 220))
+        draw.rectangle([101, 7, 119, 32], fill=(230, 40, 180))
+
+        proposals = generate_box_proposals(img)
+        proposal_map = {
+            (proposal.source, proposal.preprocess_variant): proposal.boxes
+            for proposal in proposals
+        }
+
+        expected = [[0, 8, 14, 34], [48, 10, 64, 36], [101, 7, 120, 33]]
+        self.assertEqual(
+            proposal_map[("uniform_color_regions", "whitened_padded")],
+            expected,
+        )
+
+    def test_prepare_captcha_boxes_uses_primary_proposal_metadata(self):
+        img = decode_image(make_png_bytes())
+        primary = [[20, 15, 46, 56], [70, 20, 96, 61]]
+        secondary = [[1, 1, 2, 2]]
+
+        with patch(
+            "captcha_vision.generate_box_proposals",
+            return_value=[
+                ProposalSet(boxes=secondary, source="dark_regions", preprocess_variant="whitened"),
+                ProposalSet(boxes=primary, source="uniform_color_regions", preprocess_variant="whitened"),
+            ],
+        ):
+            self.assertEqual(prepare_captcha_boxes(img, refine=False), primary)
 
     def test_build_colored_text_strip_normalizes_regions_left_to_right(self):
         img = Image.new("RGB", (160, 80), (220, 240, 250))

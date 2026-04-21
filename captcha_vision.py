@@ -474,7 +474,15 @@ def prepare_captcha_boxes(image: Image.Image, refine: bool = True) -> list[list[
     proposals = generate_box_proposals(image)
     if not proposals:
         return []
-    boxes = proposals[0].boxes
+    primary = next(
+        (
+            proposal
+            for proposal in proposals
+            if proposal.source == "uniform_color_regions" and proposal.preprocess_variant == "whitened"
+        ),
+        proposals[0],
+    )
+    boxes = primary.boxes
     if not refine:
         return boxes
     return [refine_bbox_to_dark_pixels(image, box) for box in boxes]
@@ -484,16 +492,40 @@ def _translate_boxes(boxes: list[list[int]], dx: int = 0, dy: int = 0) -> list[l
     return [[x1 + dx, y1 + dy, x2 + dx, y2 + dy] for x1, y1, x2, y2 in boxes]
 
 
+def _normalize_padded_boxes(
+    boxes: list[list[int]],
+    size: tuple[int, int],
+    border: int,
+) -> list[list[int]]:
+    normalized = []
+    width, height = size
+
+    for x1, y1, x2, y2 in _translate_boxes(boxes, dx=-border, dy=-border):
+        clipped = [max(0, x1), max(0, y1), min(width, x2), min(height, y2)]
+        if not validate_bbox(clipped, size):
+            continue
+
+        box_width = clipped[2] - clipped[0]
+        box_height = clipped[3] - clipped[1]
+        touches_edge = clipped[0] == 0 or clipped[1] == 0 or clipped[2] == width or clipped[3] == height
+        min_width = 14 if touches_edge else 16
+        if box_width < min_width or box_height < 16:
+            continue
+        normalized.append(clipped)
+
+    return normalized
+
+
 def generate_box_proposals(image: Image.Image) -> list[ProposalSet]:
     whitened = whiten_watermark(image)
     uniform = detect_colored_text_bboxes(whitened)
     dark = filter_captcha_text_bboxes(detect_dark_regions(whitened), whitened.size)
     padded_border = 2
-    padded = filter_captcha_text_bboxes(
+    padded = _normalize_padded_boxes(
         detect_colored_text_bboxes(ImageOps.expand(whitened, border=padded_border, fill="white")),
-        None,
+        whitened.size,
+        border=padded_border,
     )
-    padded = _translate_boxes(padded, dx=-padded_border, dy=-padded_border)
     return [
         ProposalSet(boxes=uniform, source="uniform_color_regions", preprocess_variant="whitened"),
         ProposalSet(boxes=dark, source="dark_regions", preprocess_variant="whitened"),
