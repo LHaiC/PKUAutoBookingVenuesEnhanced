@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 import os
@@ -8,6 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import HTTPException
+import httpx
 from PIL import Image
 
 import ocr_server_transformers
@@ -16,6 +18,7 @@ from captcha_vision import ProposalSet
 from ocr_server_transformers import (
     ParseRequest,
     accept_solution,
+    app,
     health,
     parse,
     score_proposal_set,
@@ -114,6 +117,17 @@ class OcrServerTransformerTests(unittest.TestCase):
     def tearDown(self):
         ocr_server_transformers.engine = None
 
+    def post_json(self, path: str, payload: dict):
+        async def send():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://testserver",
+            ) as client:
+                return await client.post(path, json=payload)
+
+        return asyncio.run(send())
+
     def test_score_proposal_set_prefers_full_target_coverage(self):
         image = Image.new("RGB", (160, 60), "white")
         proposal_good = ProposalSet(
@@ -185,10 +199,15 @@ class OcrServerTransformerTests(unittest.TestCase):
         ]
 
         with patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals):
-            response = parse(ParseRequest(images=[payload], targets=["今", "入", "心"]))
+            response = self.post_json(
+                "/glmocr/parse",
+                {"images": [payload], "targets": ["今", "入", "心"]},
+            )
 
-        self.assertEqual([item["text"] for item in response["results"]], ["今", "入", "心"])
-        self.assertEqual(response["method"], "glm_ocr_transformers_with_local_positioning")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual([item["text"] for item in body["results"]], ["今", "入", "心"])
+        self.assertEqual(body["method"], "glm_ocr_transformers_with_local_positioning")
 
     def test_parse_route_fails_closed_when_top_solution_is_ambiguous(self):
         ocr_server_transformers.engine = FakeRecordingEngine(outputs=["今", "入", "心"])
@@ -202,10 +221,15 @@ class OcrServerTransformerTests(unittest.TestCase):
         ]
 
         with patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals):
-            response = parse(ParseRequest(images=[payload], targets=["今", "入", "心"]))
+            response = self.post_json(
+                "/glmocr/parse",
+                {"images": [payload], "targets": ["今", "入", "心"]},
+            )
 
-        self.assertEqual(response["results"], [])
-        self.assertIn(response["error"], {"ambiguous_top_score", "incomplete_target_coverage"})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["results"], [])
+        self.assertIn(body["error"], {"ambiguous_top_score", "incomplete_target_coverage"})
 
 
 if __name__ == "__main__":

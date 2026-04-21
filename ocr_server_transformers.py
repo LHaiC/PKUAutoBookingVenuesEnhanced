@@ -172,7 +172,6 @@ def health():
     }
 
 
-@app.post("/ocr/parse")
 def parse(req: ParseRequest):
     if engine is None or not getattr(engine, "loaded", False):
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -186,3 +185,9 @@ def parse(req: ParseRequest):
         "image_size": list(image.size),
         "method": "glm_ocr_transformers_with_local_positioning",
     }
+
+
+@app.post("/glmocr/parse")
+@app.post("/ocr/parse")
+async def parse_route(req: ParseRequest):
+    return parse(req)
