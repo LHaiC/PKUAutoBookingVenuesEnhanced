@@ -31,7 +31,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # Configuration
-OCR_ENDPOINT = os.environ.get("OCR_ENDPOINT", "http://localhost:8000/ocr/parse")
+OCR_ENDPOINT = os.environ.get("OCR_ENDPOINT", "http://localhost:8000/glmocr/parse")
 HEALTH_ENDPOINT = os.environ.get("OCR_HEALTH", "http://localhost:8000/health")
 REQUEST_TIMEOUT = 120
 OUTPUT_DIR = PROJECT_ROOT / "tests" / "output" / "annotated"
@@ -50,6 +50,13 @@ SAMPLES = [
 
 # Color scheme for drawing boxes
 BOX_COLORS = ['red', 'lime', 'yellow', 'orange', 'cyan', 'magenta']
+
+
+def _local_session() -> requests.Session:
+    """Use direct localhost connections even if proxy env vars are set."""
+    session = requests.Session()
+    session.trust_env = False
+    return session
 
 
 def image_to_data_uri(image: Image.Image) -> str:
@@ -80,7 +87,7 @@ def get_ocr_result(image: Image.Image, targets: list[str] | None = None) -> dict
     if targets is not None:
         payload["targets"] = targets
 
-    resp = requests.post(OCR_ENDPOINT, json=payload, timeout=REQUEST_TIMEOUT)
+    resp = _local_session().post(OCR_ENDPOINT, json=payload, timeout=REQUEST_TIMEOUT)
     resp.raise_for_status()
     return resp.json()
 
@@ -88,11 +95,24 @@ def get_ocr_result(image: Image.Image, targets: list[str] | None = None) -> dict
 def check_server_ready() -> bool:
     """Check if OCR server is running and model is loaded."""
     try:
-        resp = requests.get(HEALTH_ENDPOINT, timeout=5)
+        resp = _local_session().get(HEALTH_ENDPOINT, timeout=5)
         result = resp.json()
-        return result.get("model_loaded", False)
+        # PaddleOCR server: {"status":"ok","model":"paddleocr"}
+        # GLM server: {"status":"ok","model":"glm-ocr","model_loaded":true}
+        if "model_loaded" in result:
+            return result.get("model_loaded", False)
+        # PaddleOCR health format - status ok means ready
+        return result.get("status") == "ok"
     except requests.RequestException:
         return False
+
+
+def test_health_endpoint_is_glm_server():
+    response = _local_session().get(HEALTH_ENDPOINT, timeout=5)
+    response.raise_for_status()
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["model"] in {"glm-ocr", "glm_ocr_transformers"}
 
 
 # PaddleOCR handles detection+recognition natively; no rule-based box detection needed.
