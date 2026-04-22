@@ -1086,12 +1086,27 @@ def solve_image(image: Image.Image, targets: list[str]) -> dict:
     proposals = generate_box_proposals(image)
     scored = []
     recoverable = []
+    recognize_cache: dict[bytes, str] = {}
+    cached_recognizer = lambda image_bytes: _recognize_with_cache(engine.recognize, recognize_cache, image_bytes)
     for proposal in proposals:
         if not (3 <= len(proposal.boxes) <= 6):
             continue
-        candidates, failed_boxes = recognize_box_candidates_with_recovery(image, proposal.boxes, targets)
+        candidates, failed_boxes = recognize_box_candidates_with_recovery(
+            image,
+            proposal.boxes,
+            targets,
+            recognizer=cached_recognizer,
+        )
         score = score_proposal_set(image, proposal, targets, candidates)
         scored.append(score)
+        early_accepted, _ = accept_solution(score, None, expected_match_count=len(targets))
+        if (
+            early_accepted
+            and not failed_boxes
+            and len(proposal.boxes) == len(targets)
+            and len(candidates) == len(targets)
+        ):
+            return build_solver_response(image, score["matched"], "ok")
         if failed_boxes:
             recoverable.append((score, candidates, failed_boxes))
 
@@ -1104,7 +1119,12 @@ def solve_image(image: Image.Image, targets: list[str]) -> dict:
 
     rescored = list(scored)
     for base_score, candidates, failed_boxes in sorted(recoverable, key=lambda item: item[0]["score"], reverse=True)[:2]:
-        rotated_candidates = recognize_rotated_box_candidates(image, targets, failed_boxes)
+        rotated_candidates = recognize_rotated_box_candidates(
+            image,
+            targets,
+            failed_boxes,
+            recognizer=cached_recognizer,
+        )
         if not rotated_candidates:
             continue
         rescored.append(

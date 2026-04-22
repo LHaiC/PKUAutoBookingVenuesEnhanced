@@ -446,7 +446,7 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(reason, "inconsistent_box_size")
 
     def test_parse_route_uses_best_proposal_set_for_targets(self):
-        ocr_server_transformers.engine = FakeRecordingEngine(outputs=["今", "入", "心", "今入", "心"])
+        ocr_server_transformers.engine = FakeEngine()
         payload = make_png_data_uri(width=160, height=60)
         proposals = [
             ProposalSet(
@@ -460,9 +460,22 @@ class OcrServerTransformerTests(unittest.TestCase):
                 preprocess_variant="whitened",
             ),
         ]
+        direct_candidates = [
+            Candidate("今", proposals[0].boxes[0], 0.80),
+            Candidate("入", proposals[0].boxes[1], 0.80),
+            Candidate("心", proposals[0].boxes[2], 0.80),
+        ]
 
         with (
             patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals),
+            patch.object(
+                ocr_server_transformers,
+                "recognize_box_candidates_with_recovery",
+                side_effect=[
+                    (direct_candidates, []),
+                    AssertionError("second proposal should not run after early success"),
+                ],
+            ),
             patch.object(
                 ocr_server_transformers,
                 "solve_image_with_legacy_fallback",
@@ -472,7 +485,7 @@ class OcrServerTransformerTests(unittest.TestCase):
                     "method": "glm_ocr_transformers_with_local_positioning",
                     "image_size": [160, 60],
                 },
-            ),
+            ) as fallback_mock,
         ):
             response = self.post_json(
                 "/glmocr/parse",
@@ -483,6 +496,7 @@ class OcrServerTransformerTests(unittest.TestCase):
         body = response.json()
         self.assertEqual([item["text"] for item in body["results"]], ["今", "入", "心"])
         self.assertEqual(body["method"], "glm_ocr_transformers_with_local_positioning")
+        fallback_mock.assert_not_called()
 
     def test_parse_route_fails_closed_when_top_solution_is_ambiguous(self):
         ocr_server_transformers.engine = FakeRecordingEngine(outputs=["今", "入", "心"])
@@ -519,8 +533,7 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertIn(body["error"], {"ambiguous_top_score", "incomplete_target_coverage"})
 
     def test_parse_route_recovers_failed_box_with_rotated_fallback(self):
-        engine = FakeRecordingEngine(outputs=["今", "今入", "心", "今入", "入"])
-        ocr_server_transformers.engine = engine
+        ocr_server_transformers.engine = FakeEngine()
         payload = make_png_data_uri(width=160, height=60)
         proposals = [
             ProposalSet(
@@ -529,8 +542,26 @@ class OcrServerTransformerTests(unittest.TestCase):
                 preprocess_variant="whitened",
             )
         ]
+        direct_candidates = [
+            Candidate("今", proposals[0].boxes[0], 0.80),
+            Candidate("心", proposals[0].boxes[2], 0.80),
+        ]
+        rotated_candidates = [Candidate("入", proposals[0].boxes[1], 0.50)]
 
-        with patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals):
+        with (
+            patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals),
+            patch.object(
+                ocr_server_transformers,
+                "recognize_box_candidates_with_recovery",
+                return_value=(direct_candidates, [proposals[0].boxes[1]]),
+            ),
+            patch.object(
+                ocr_server_transformers,
+                "recognize_rotated_box_candidates",
+                return_value=rotated_candidates,
+            ),
+            patch.object(ocr_server_transformers, "solve_image_with_legacy_fallback") as fallback_mock,
+        ):
             response = self.post_json(
                 "/glmocr/parse",
                 {"images": [payload], "targets": ["今", "入", "心"]},
@@ -539,7 +570,7 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual([item["text"] for item in body["results"]], ["今", "入", "心"])
-        self.assertEqual(len(engine.calls), 5)
+        fallback_mock.assert_not_called()
 
     def test_solve_image_invokes_legacy_fallback_when_current_path_rejects(self):
         image = Image.new("RGB", (160, 60), "white")
@@ -851,6 +882,114 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual([item["text"] for item in result["results"]], ["今", "入", "心"])
         rotated_mock.assert_not_called()
         fallback_mock.assert_not_called()
+
+    def test_solve_image_returns_early_after_safe_strong_direct_hit(self):
+        image = Image.new("RGB", (160, 60), "white")
+        proposals = [
+            ProposalSet(
+                boxes=[[10, 10, 30, 30], [50, 10, 70, 30], [90, 10, 110, 30]],
+                source="uniform_color_regions",
+                preprocess_variant="whitened",
+            ),
+            ProposalSet(
+                boxes=[[12, 10, 32, 30], [52, 10, 72, 30], [92, 10, 112, 30]],
+                source="isolated_uniform",
+                preprocess_variant="isolated",
+            ),
+        ]
+        direct_candidates = [
+            Candidate("今", proposals[0].boxes[0], 0.80),
+            Candidate("入", proposals[0].boxes[1], 0.80),
+            Candidate("心", proposals[0].boxes[2], 0.80),
+        ]
+
+        def unexpected_second_proposal(*_args, **_kwargs):
+            raise AssertionError("second proposal should not be evaluated after strong direct hit")
+
+        with (
+            patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals),
+            patch.object(
+                ocr_server_transformers,
+                "recognize_box_candidates_with_recovery",
+                side_effect=[
+                    (direct_candidates, []),
+                    unexpected_second_proposal,
+                ],
+            ),
+            patch.object(ocr_server_transformers, "solve_image_with_legacy_fallback") as fallback_mock,
+        ):
+            result = ocr_server_transformers.solve_image(image, ["今", "入", "心"])
+
+        self.assertEqual(result["error"], "ok")
+        self.assertEqual([item["text"] for item in result["results"]], ["今", "入", "心"])
+        fallback_mock.assert_not_called()
+
+    def test_solve_image_reuses_cached_ocr_outputs_across_proposals(self):
+        image = Image.new("RGB", (160, 60), "white")
+        proposals = [
+            ProposalSet(
+                boxes=[[10, 10, 30, 30], [50, 10, 70, 30], [90, 10, 110, 30], [120, 10, 140, 30]],
+                source="uniform_color_regions",
+                preprocess_variant="whitened",
+            ),
+            ProposalSet(
+                boxes=[[10, 10, 30, 30], [50, 10, 70, 30], [90, 10, 110, 30], [140, 10, 160, 30]],
+                source="isolated_uniform",
+                preprocess_variant="isolated",
+            ),
+        ]
+
+        ocr_server_transformers.engine = Mock()
+        ocr_server_transformers.engine.recognize = Mock(
+            side_effect=lambda payload: {
+                b"box:10,10,30,30": "今",
+                b"box:50,10,70,30": "入",
+                b"box:90,10,110,30": "心",
+                b"box:120,10,140,30": "noise",
+                b"box:140,10,160,30": "noise",
+            }[payload]
+        )
+
+        def recognize_side_effect(_image, boxes, targets, recognizer=None):
+            candidates = []
+            failed = []
+            for box in boxes:
+                payload = f"box:{','.join(str(value) for value in box)}".encode("ascii")
+                output = recognizer(payload)
+                if output in set(targets):
+                    candidates.append(Candidate(output, box, 0.80))
+                else:
+                    failed.append(box)
+            return candidates, failed
+
+        with (
+            patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals),
+            patch.object(
+                ocr_server_transformers,
+                "recognize_box_candidates_with_recovery",
+                side_effect=recognize_side_effect,
+            ),
+            patch.object(ocr_server_transformers, "recognize_rotated_box_candidates", return_value=[]),
+            patch.object(
+                ocr_server_transformers,
+                "solve_image_with_legacy_fallback",
+                return_value={
+                    "error": "ok",
+                    "results": [
+                        {"text": "今", "bbox": [10, 10, 30, 30], "x": 20, "y": 20, "confidence": 0.8},
+                        {"text": "入", "bbox": [50, 10, 70, 30], "x": 60, "y": 20, "confidence": 0.8},
+                        {"text": "心", "bbox": [90, 10, 110, 30], "x": 100, "y": 20, "confidence": 0.8},
+                    ],
+                    "method": "glm_ocr_transformers_with_local_positioning",
+                    "image_size": [160, 60],
+                },
+            ) as fallback_mock,
+        ):
+            result = ocr_server_transformers.solve_image(image, ["今", "入", "心"])
+
+        self.assertEqual(result["error"], "ok")
+        self.assertEqual(ocr_server_transformers.engine.recognize.call_count, 5)
+        fallback_mock.assert_called_once()
 
     def test_legacy_fallback_does_not_attach_strip_output_when_box_count_exceeds_targets(self):
         ocr_server_transformers.engine = FakeRecordingEngine(
