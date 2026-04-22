@@ -15,6 +15,7 @@ from captcha_matcher import Candidate
 from captcha_vision import ProposalSet
 from ocr_server_transformers import (
     GlmOcrEngine,
+    OCR_MAX_NEW_TOKENS,
     ParseRequest,
     accept_solution,
     app,
@@ -82,11 +83,32 @@ class FakeInputIds:
     shape = (1, 2)
 
 
+class FakeBatchInputIds:
+    def __init__(self, batch_size: int, prompt_tokens: int = 2):
+        self.shape = (batch_size, prompt_tokens)
+
+
 class FakeInputs(dict):
     def __init__(self):
         super().__init__(
             {
                 "input_ids": FakeInputIds(),
+                "attention_mask": "keep",
+                "token_type_ids": "drop",
+            }
+        )
+        self.device = None
+
+    def to(self, device):
+        self.device = device
+        return self
+
+
+class FakeBatchInputs(dict):
+    def __init__(self, batch_size: int):
+        super().__init__(
+            {
+                "input_ids": FakeBatchInputIds(batch_size),
                 "attention_mask": "keep",
                 "token_type_ids": "drop",
             }
@@ -119,6 +141,27 @@ class FakeProcessor:
         return "decoded-output"
 
 
+class FakeBatchProcessor(FakeProcessor):
+    def __init__(self):
+        super().__init__()
+        self.batch_inputs = None
+        self.batch_messages = None
+        self.batch_kwargs = None
+        self.batch_decode_calls = []
+
+    def apply_chat_template(self, messages, **kwargs):
+        if messages and isinstance(messages[0], list):
+            self.batch_messages = messages
+            self.batch_kwargs = kwargs
+            self.batch_inputs = FakeBatchInputs(len(messages))
+            return self.batch_inputs
+        return super().apply_chat_template(messages, **kwargs)
+
+    def decode(self, output_ids, skip_special_tokens=False):
+        self.batch_decode_calls.append((output_ids, skip_special_tokens))
+        return f"decoded-{len(self.batch_decode_calls)}"
+
+
 class FakeModel:
     device = "cpu"
 
@@ -128,6 +171,15 @@ class FakeModel:
     def generate(self, **kwargs):
         self.generate_kwargs = kwargs
         return [[101, 102, 201, 202]]
+
+
+class FakeBatchModel(FakeModel):
+    def generate(self, **kwargs):
+        self.generate_kwargs = kwargs
+        return [
+            [101, 102, 201, 202],
+            [101, 102, 301, 302],
+        ]
 
 
 class RouteResponse:
@@ -353,9 +405,24 @@ class GlmOcrEngineRequestTests(unittest.TestCase):
         self.assertEqual(processor.inputs.device, "cpu")
         self.assertNotIn("token_type_ids", model.generate_kwargs)
         self.assertIs(model.generate_kwargs["input_ids"], processor.inputs["input_ids"])
-        self.assertEqual(model.generate_kwargs["max_new_tokens"], 128)
-        self.assertEqual(processor.messages[0]["content"][1]["text"], "Text Recognition:")
-        self.assertEqual(processor.decode_args, ([201, 202], False))
+        self.assertEqual(model.generate_kwargs["max_new_tokens"], OCR_MAX_NEW_TOKENS)
+
+    def test_recognize_batch_builds_transformers_request_without_real_model(self):
+        engine = GlmOcrEngine("fake-model")
+        processor = FakeBatchProcessor()
+        model = FakeBatchModel()
+        engine.processor = processor
+        engine.model = model
+
+        outputs = engine.recognize_batch([b"fake-image-1", b"fake-image-2"], ["件", "叶"])
+
+        self.assertEqual(outputs, ["decoded-1", "decoded-2"])
+        self.assertEqual(len(processor.batch_messages), 2)
+        self.assertNotIn("token_type_ids", model.generate_kwargs)
+        self.assertIs(model.generate_kwargs["input_ids"], processor.batch_inputs["input_ids"])
+        self.assertEqual(model.generate_kwargs["max_new_tokens"], OCR_MAX_NEW_TOKENS)
+        self.assertEqual(processor.batch_messages[0][0]["content"][1]["text"], "Text Recognition:")
+        self.assertEqual(processor.batch_decode_calls, [([201, 202], False), ([301, 302], False)])
 
 
 class OcrServerTransformerTests(unittest.TestCase):
@@ -598,6 +665,7 @@ class OcrServerTransformerTests(unittest.TestCase):
                 "recognize_box_candidates_with_recovery",
                 return_value=([], []),
             ),
+            patch.object(ocr_server_transformers, "recognize_rotated_box_candidates", return_value=[]),
             patch.object(
                 ocr_server_transformers,
                 "solve_image_with_legacy_fallback",
@@ -951,7 +1019,7 @@ class OcrServerTransformerTests(unittest.TestCase):
             }[payload]
         )
 
-        def recognize_side_effect(_image, boxes, targets, recognizer=None):
+        def recognize_side_effect(_image, boxes, targets, recognizer=None, batch_recognizer=None, recognize_cache=None, stop_on_full_target_coverage=False):
             candidates = []
             failed = []
             for box in boxes:
@@ -991,6 +1059,302 @@ class OcrServerTransformerTests(unittest.TestCase):
         self.assertEqual(result["error"], "ok")
         self.assertEqual(ocr_server_transformers.engine.recognize.call_count, 5)
         fallback_mock.assert_called_once()
+
+    def test_solve_image_skips_fully_redundant_proposals(self):
+        image = Image.new("RGB", (160, 60), "white")
+        boxes = [[10, 10, 30, 30], [50, 10, 70, 30], [90, 10, 110, 30], [120, 10, 140, 30]]
+        proposals = [
+            ProposalSet(boxes=boxes, source="uniform_color_regions", preprocess_variant="whitened"),
+            ProposalSet(boxes=list(boxes), source="isolated_uniform", preprocess_variant="isolated"),
+        ]
+
+        ocr_server_transformers.engine = Mock()
+        ocr_server_transformers.engine.recognize = Mock(
+            side_effect=lambda payload: {
+                b"box:10,10,30,30": "今",
+                b"box:50,10,70,30": "入",
+                b"box:90,10,110,30": "心",
+                b"box:120,10,140,30": "noise",
+            }[payload]
+        )
+
+        def recognize_side_effect(_image, boxes, targets, recognizer=None, batch_recognizer=None, recognize_cache=None, stop_on_full_target_coverage=False):
+            candidates = []
+            failed = []
+            for box in boxes:
+                payload = f"box:{','.join(str(value) for value in box)}".encode("ascii")
+                output = recognizer(payload)
+                if output in set(targets):
+                    candidates.append(Candidate(output, box, 0.80))
+                else:
+                    failed.append(box)
+            return candidates, failed
+
+        with (
+            patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals),
+            patch.object(
+                ocr_server_transformers,
+                "recognize_box_candidates_with_recovery",
+                side_effect=recognize_side_effect,
+            ) as recognize_mock,
+            patch.object(ocr_server_transformers, "recognize_rotated_box_candidates", return_value=[]),
+            patch.object(
+                ocr_server_transformers,
+                "solve_image_with_legacy_fallback",
+                return_value={"error": "incomplete_target_coverage", "results": [], "image_size": [160, 60]},
+            ),
+        ):
+            ocr_server_transformers.solve_image(image, ["今", "入", "心"])
+
+        self.assertEqual(ocr_server_transformers.engine.recognize.call_count, 4)
+        self.assertEqual(recognize_mock.call_count, 1)
+
+    def test_solve_image_only_recognizes_novel_boxes_in_later_proposals(self):
+        image = Image.new("RGB", (160, 60), "white")
+        proposals = [
+            ProposalSet(
+                boxes=[[10, 10, 30, 30], [50, 10, 70, 30], [90, 10, 110, 30], [120, 10, 140, 30]],
+                source="uniform_color_regions",
+                preprocess_variant="whitened",
+            ),
+            ProposalSet(
+                boxes=[[10, 10, 30, 30], [50, 10, 70, 30], [90, 10, 110, 30], [140, 10, 160, 30]],
+                source="isolated_uniform",
+                preprocess_variant="isolated",
+            ),
+        ]
+
+        ocr_server_transformers.engine = Mock()
+        ocr_server_transformers.engine.recognize = Mock(
+            side_effect=lambda payload: {
+                b"box:10,10,30,30": "今",
+                b"box:50,10,70,30": "入",
+                b"box:90,10,110,30": "心",
+                b"box:120,10,140,30": "noise",
+                b"box:140,10,160,30": "noise",
+            }[payload]
+        )
+
+        def recognize_side_effect(_image, boxes, targets, recognizer=None, batch_recognizer=None, recognize_cache=None, stop_on_full_target_coverage=False):
+            candidates = []
+            failed = []
+            for box in boxes:
+                payload = f"box:{','.join(str(value) for value in box)}".encode("ascii")
+                output = recognizer(payload)
+                if output in set(targets):
+                    candidates.append(Candidate(output, box, 0.80))
+                else:
+                    failed.append(box)
+            return candidates, failed
+
+        with (
+            patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals),
+            patch.object(
+                ocr_server_transformers,
+                "recognize_box_candidates_with_recovery",
+                side_effect=recognize_side_effect,
+            ) as recognize_mock,
+            patch.object(ocr_server_transformers, "recognize_rotated_box_candidates", return_value=[]),
+            patch.object(
+                ocr_server_transformers,
+                "solve_image_with_legacy_fallback",
+                return_value={"error": "incomplete_target_coverage", "results": [], "image_size": [160, 60]},
+            ),
+        ):
+            ocr_server_transformers.solve_image(image, ["今", "入", "心"])
+
+        self.assertEqual(ocr_server_transformers.engine.recognize.call_count, 5)
+        self.assertEqual(recognize_mock.call_count, 2)
+
+    def test_solve_image_prioritizes_higher_quality_proposals_before_noisy_ones(self):
+        image = Image.new("RGB", (160, 60), "white")
+        noisy = ProposalSet(
+            boxes=[
+                [10, 10, 30, 30],
+                [50, 10, 70, 30],
+                [90, 10, 110, 30],
+                [130, 10, 150, 30],
+                [10, 35, 20, 44],
+                [140, 35, 155, 55],
+            ],
+            source="uniform_color_regions",
+            preprocess_variant="whitened",
+        )
+        clean = ProposalSet(
+            boxes=[[12, 12, 34, 34], [52, 12, 74, 34], [92, 12, 114, 34]],
+            source="isolated_uniform",
+            preprocess_variant="isolated",
+        )
+        call_order = []
+
+        def recognize_side_effect(_image, boxes, targets, recognizer=None, batch_recognizer=None, recognize_cache=None, stop_on_full_target_coverage=False):
+            call_order.append(boxes)
+            if boxes == clean.boxes:
+                return (
+                    [
+                        Candidate("今", clean.boxes[0], 0.80),
+                        Candidate("入", clean.boxes[1], 0.80),
+                        Candidate("心", clean.boxes[2], 0.80),
+                    ],
+                    [],
+                )
+            return ([], boxes)
+
+        with (
+            patch.object(ocr_server_transformers, "generate_box_proposals", return_value=[noisy, clean]),
+            patch.object(
+                ocr_server_transformers,
+                "recognize_box_candidates_with_recovery",
+                side_effect=recognize_side_effect,
+            ),
+            patch.object(ocr_server_transformers, "solve_image_with_legacy_fallback") as fallback_mock,
+        ):
+            result = ocr_server_transformers.solve_image(image, ["今", "入", "心"])
+
+        self.assertEqual(result["error"], "ok")
+        self.assertEqual(call_order[0], clean.boxes)
+        fallback_mock.assert_not_called()
+
+    def test_recognize_box_candidates_stops_after_covering_all_targets(self):
+        image = Image.new("RGB", (160, 60), "white")
+        boxes = [
+            [10, 10, 30, 30],
+            [50, 10, 70, 30],
+            [90, 10, 110, 30],
+            [130, 10, 150, 30],
+            [10, 35, 30, 55],
+        ]
+        calls = []
+
+        def recognizer(payload):
+            calls.append(payload)
+            outputs = {
+                b"box:10,10,30,30": "今",
+                b"box:50,10,70,30": "入",
+                b"box:90,10,110,30": "心",
+                b"box:130,10,150,30": "噪",
+                b"box:10,35,30,55": "声",
+            }
+            return outputs[payload]
+
+        payloads = iter(
+            [
+                b"box:10,10,30,30",
+                b"box:50,10,70,30",
+                b"box:90,10,110,30",
+            ]
+        )
+        with patch.object(
+            ocr_server_transformers,
+            "image_to_png_bytes",
+            side_effect=lambda _crop: next(payloads),
+        ):
+            candidates, failed = ocr_server_transformers.recognize_box_candidates_with_recovery(
+                image,
+                boxes,
+                ["今", "入", "心"],
+                recognizer=recognizer,
+                stop_on_full_target_coverage=True,
+            )
+
+        self.assertEqual([candidate.text for candidate in candidates], ["今", "入", "心"])
+        self.assertEqual(failed, [])
+        self.assertEqual(len(calls), 3)
+
+    def test_recognize_box_candidates_uses_batch_recognizer_for_crop_chunks(self):
+        image = Image.new("RGB", (160, 60), "white")
+        boxes = [
+            [10, 10, 30, 30],
+            [50, 10, 70, 30],
+            [90, 10, 110, 30],
+            [130, 10, 150, 30],
+        ]
+        single_recognizer = Mock(side_effect=AssertionError("single recognizer should not be used"))
+        batch_calls = []
+
+        def batch_recognizer(payloads, _targets=None):
+            batch_calls.append(list(payloads))
+            outputs = {
+                b"box:10,10,30,30": "今",
+                b"box:50,10,70,30": "入",
+                b"box:90,10,110,30": "心",
+                b"box:130,10,150,30": "噪",
+            }
+            return [outputs[payload] for payload in payloads]
+
+        payloads = iter(
+            [
+                b"box:10,10,30,30",
+                b"box:50,10,70,30",
+                b"box:90,10,110,30",
+            ]
+        )
+        with patch.object(
+            ocr_server_transformers,
+            "image_to_png_bytes",
+            side_effect=lambda _crop: next(payloads),
+        ):
+            candidates, failed = ocr_server_transformers.recognize_box_candidates_with_recovery(
+                image,
+                boxes,
+                ["今", "入", "心"],
+                recognizer=single_recognizer,
+                batch_recognizer=batch_recognizer,
+                stop_on_full_target_coverage=True,
+            )
+
+        self.assertEqual([candidate.text for candidate in candidates], ["今", "入", "心"])
+        self.assertEqual(failed, [])
+        self.assertEqual(len(batch_calls), 1)
+        single_recognizer.assert_not_called()
+
+    def test_solve_image_prefilters_clear_geometry_outlier_boxes_before_ocr(self):
+        image = Image.new("RGB", (160, 60), "white")
+        boxes = [
+            [10, 10, 30, 30],
+            [50, 10, 70, 30],
+            [90, 10, 110, 30],
+            [140, 10, 146, 17],
+        ]
+        proposals = [
+            ProposalSet(boxes=boxes, source="uniform_color_regions", preprocess_variant="whitened"),
+        ]
+
+        ocr_server_transformers.engine = Mock()
+        ocr_server_transformers.engine.recognize = Mock(
+            side_effect=lambda payload: {
+                b"box:10,10,30,30": "今",
+                b"box:50,10,70,30": "入",
+                b"box:90,10,110,30": "心",
+            }[payload]
+        )
+        observed_boxes = []
+
+        def recognize_side_effect(_image, candidate_boxes, targets, recognizer=None, batch_recognizer=None, recognize_cache=None, stop_on_full_target_coverage=False):
+            observed_boxes.extend(candidate_boxes)
+            candidates = []
+            for box in candidate_boxes:
+                payload = f"box:{','.join(str(value) for value in box)}".encode("ascii")
+                output = recognizer(payload)
+                if output in set(targets):
+                    candidates.append(Candidate(output, box, 0.80))
+            return candidates, []
+
+        with (
+            patch.object(ocr_server_transformers, "generate_box_proposals", return_value=proposals),
+            patch.object(
+                ocr_server_transformers,
+                "recognize_box_candidates_with_recovery",
+                side_effect=recognize_side_effect,
+            ),
+            patch.object(ocr_server_transformers, "solve_image_with_legacy_fallback") as fallback_mock,
+        ):
+            result = ocr_server_transformers.solve_image(image, ["今", "入", "心"])
+
+        self.assertEqual(result["error"], "ok")
+        self.assertEqual(observed_boxes, boxes[:3])
+        self.assertEqual(ocr_server_transformers.engine.recognize.call_count, 3)
+        fallback_mock.assert_not_called()
 
     def test_legacy_fallback_does_not_attach_strip_output_when_box_count_exceeds_targets(self):
         ocr_server_transformers.engine = FakeRecordingEngine(

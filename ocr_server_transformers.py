@@ -8,6 +8,7 @@ import re
 import tempfile
 from collections import Counter
 from contextlib import contextmanager
+from contextlib import ExitStack
 from itertools import combinations
 
 from fastapi import FastAPI, HTTPException
@@ -35,6 +36,7 @@ engine = None
 OCR_CHAR_NORMALIZATION = {
     "イ": "八",
 }
+OCR_MAX_NEW_TOKENS = 64
 
 
 class ParseRequest(BaseModel):
@@ -66,6 +68,13 @@ def temporary_image_file(image_bytes: bytes):
             os.unlink(path)
         except FileNotFoundError:
             pass
+
+
+@contextmanager
+def temporary_image_files(image_bytes_list: list[bytes]):
+    with ExitStack() as stack:
+        paths = [stack.enter_context(temporary_image_file(image_bytes)) for image_bytes in image_bytes_list]
+        yield paths
 
 
 class GlmOcrEngine:
@@ -112,9 +121,46 @@ class GlmOcrEngine:
                 return_tensors="pt",
             ).to(self.model.device)
             inputs.pop("token_type_ids", None)
-            generated_ids = self.model.generate(**inputs, max_new_tokens=128)
+            generated_ids = self.model.generate(**inputs, max_new_tokens=OCR_MAX_NEW_TOKENS)
             output_ids = generated_ids[0][inputs["input_ids"].shape[1] :]
             return self.processor.decode(output_ids, skip_special_tokens=False)
+
+    def recognize_batch(self, image_bytes_list: list[bytes], targets: list[str] | None = None) -> list[str]:
+        if not self.loaded:
+            raise RuntimeError("model not loaded")
+        if not image_bytes_list:
+            return []
+        if len(image_bytes_list) == 1:
+            return [self.recognize(image_bytes_list[0], targets)]
+
+        prompt = "Text Recognition:"
+        with temporary_image_files(image_bytes_list) as image_paths:
+            messages = [
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "url": image_path},
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ]
+                for image_path in image_paths
+            ]
+            inputs = self.processor.apply_chat_template(
+                messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_dict=True,
+                return_tensors="pt",
+            ).to(self.model.device)
+            inputs.pop("token_type_ids", None)
+            generated_ids = self.model.generate(**inputs, max_new_tokens=OCR_MAX_NEW_TOKENS)
+            prompt_tokens = inputs["input_ids"].shape[1]
+            return [
+                self.processor.decode(generated_ids[idx][prompt_tokens:], skip_special_tokens=False)
+                for idx in range(len(image_bytes_list))
+            ]
 
 
 def image_to_png_bytes(image: Image.Image) -> bytes:
@@ -130,6 +176,37 @@ def _recognize_with_cache(recognizer, cache: dict[bytes, str], image_bytes: byte
     output = recognizer(image_bytes)
     cache[image_bytes] = output
     return output
+
+
+def _recognize_many_with_cache(
+    recognizer,
+    batch_recognizer,
+    cache: dict[bytes, str],
+    image_bytes_list: list[bytes],
+    targets: list[str] | None = None,
+) -> list[str]:
+    outputs: list[str | None] = [None] * len(image_bytes_list)
+    missing_bytes: list[bytes] = []
+    missing_positions: list[int] = []
+
+    for idx, image_bytes in enumerate(image_bytes_list):
+        cached = cache.get(image_bytes)
+        if cached is not None:
+            outputs[idx] = cached
+            continue
+        missing_bytes.append(image_bytes)
+        missing_positions.append(idx)
+
+    if missing_bytes:
+        if batch_recognizer is not None and len(missing_bytes) > 1:
+            recognized = batch_recognizer(missing_bytes, targets)
+        else:
+            recognized = [recognizer(image_bytes) for image_bytes in missing_bytes]
+        for idx, image_bytes, output in zip(missing_positions, missing_bytes, recognized):
+            cache[image_bytes] = output
+            outputs[idx] = output
+
+    return [output or "" for output in outputs]
 
 
 def crop_box_image(image: Image.Image, box: list[int], padding: int = 5) -> Image.Image:
@@ -627,6 +704,16 @@ def recognize_box_crop(image: Image.Image, box: list[int], target_set: set[str] 
     return Candidate(text=text, bbox=box, confidence=0.80, original_bbox=list(box))
 
 
+def _candidate_from_output(output: str, box: list[int], target_set: set[str] | None) -> Candidate | None:
+    chars = parse_model_output(output)
+    if len(chars) != 1:
+        return None
+    text = chars[0]
+    if target_set is not None and text not in target_set:
+        return None
+    return Candidate(text=text, bbox=box, confidence=0.80, original_bbox=list(box))
+
+
 def recognize_box_crops(image: Image.Image, boxes: list[list[int]], targets: list[str] | None, recognizer=None):
     target_set = set(targets) if targets else None
     results = []
@@ -643,16 +730,36 @@ def recognize_box_candidates_with_recovery(
     boxes: list[list[int]],
     targets: list[str] | None,
     recognizer=None,
+    batch_recognizer=None,
+    recognize_cache: dict[bytes, str] | None = None,
+    stop_on_full_target_coverage: bool = False,
 ) -> tuple[list[Candidate], list[list[int]]]:
     target_set = set(targets) if targets else None
+    remaining_target_counts = Counter(targets or [])
+    recognizer = engine.recognize if recognizer is None else recognizer
+    if batch_recognizer is None and engine is not None:
+        batch_recognizer = getattr(engine, "recognize_batch", None)
+    recognize_cache = {} if recognize_cache is None else recognize_cache
     candidates = []
     failed_boxes = []
-    for box in boxes:
-        candidate = recognize_box_crop(image, box, target_set, recognizer=recognizer)
-        if candidate is None:
-            failed_boxes.append(box)
-            continue
-        candidates.append(candidate)
+    chunk_size = len(targets or []) if batch_recognizer is not None and targets else 1
+    chunk_size = max(1, chunk_size)
+    for start in range(0, len(boxes), chunk_size):
+        chunk_boxes = boxes[start : start + chunk_size]
+        image_bytes_list = [image_to_png_bytes(crop_box_image(image, box)) for box in chunk_boxes]
+        outputs = _recognize_many_with_cache(recognizer, batch_recognizer, recognize_cache, image_bytes_list, targets)
+        for box, output in zip(chunk_boxes, outputs):
+            candidate = _candidate_from_output(output, box, target_set)
+            if candidate is None:
+                failed_boxes.append(box)
+                continue
+            candidates.append(candidate)
+            if remaining_target_counts.get(candidate.text, 0) > 0:
+                remaining_target_counts[candidate.text] -= 1
+        if stop_on_full_target_coverage and remaining_target_counts and all(
+            count <= 0 for count in remaining_target_counts.values()
+        ):
+            break
     return candidates, failed_boxes
 
 
@@ -697,6 +804,54 @@ def score_proposal_set(
         - max(0, len(proposal.boxes) - 3)
     )
     return {"score": score, "matched": matched, "size_stats": size_stats, "proposal": proposal}
+
+
+def cheap_proposal_score(proposal: ProposalSet, target_count: int) -> float:
+    if not proposal.boxes:
+        return float("-inf")
+    size_score = measure_box_size_consistency(proposal.boxes).get("score", 0.0)
+    box_count = len(proposal.boxes)
+    count_penalty = abs(box_count - target_count) + max(0, box_count - target_count) * 0.5
+    return float(size_score) * 10.0 - count_penalty
+
+
+def filter_obvious_noise_boxes(boxes: list[list[int]], target_count: int) -> tuple[list[list[int]], list[list[int]]]:
+    if len(boxes) <= target_count or len(boxes) < 4:
+        return [list(box) for box in boxes], []
+
+    widths = sorted(_bbox_width(box) for box in boxes)
+    heights = sorted(_bbox_height(box) for box in boxes)
+    areas = sorted(_bbox_area(box) for box in boxes)
+    median_width = widths[len(widths) // 2]
+    median_height = heights[len(heights) // 2]
+    median_area = areas[len(areas) // 2]
+
+    kept = []
+    rejected = []
+    for box in boxes:
+        width = _bbox_width(box)
+        height = _bbox_height(box)
+        area = _bbox_area(box)
+        aspect_ratio = width / max(1, height)
+        too_small = (
+            width < median_width * 0.55
+            or height < median_height * 0.55
+            or area < median_area * 0.35
+        )
+        too_large = (
+            width > median_width * 1.90
+            or height > median_height * 1.90
+            or area > median_area * 2.80
+        )
+        too_skinny = aspect_ratio < 0.40 or aspect_ratio > 2.40
+        if too_small or too_large or too_skinny:
+            rejected.append([int(value) for value in box])
+            continue
+        kept.append([int(value) for value in box])
+
+    if len(kept) < target_count:
+        return [list(box) for box in boxes], []
+    return kept, rejected
 
 
 def results_have_consistent_box_sizes(results: list[dict]) -> bool:
@@ -1083,20 +1238,70 @@ def solve_image_with_legacy_fallback(
 
 
 def solve_image(image: Image.Image, targets: list[str]) -> dict:
-    proposals = generate_box_proposals(image)
+    proposals = sorted(
+        generate_box_proposals(image),
+        key=lambda proposal: cheap_proposal_score(proposal, len(targets)),
+        reverse=True,
+    )
     scored = []
     recoverable = []
     recognize_cache: dict[bytes, str] = {}
     cached_recognizer = lambda image_bytes: _recognize_with_cache(engine.recognize, recognize_cache, image_bytes)
+    batch_impl = getattr(engine, "recognize_batch", None) if engine is not None else None
+    cached_batch_recognizer = (
+        (lambda image_bytes_list, candidate_targets=None: batch_impl(image_bytes_list, candidate_targets))
+        if batch_impl is not None
+        else None
+    )
+    box_candidate_cache: dict[tuple[int, int, int, int], Candidate | None] = {}
     for proposal in proposals:
         if not (3 <= len(proposal.boxes) <= 6):
             continue
-        candidates, failed_boxes = recognize_box_candidates_with_recovery(
+        filtered_boxes, rejected_boxes = filter_obvious_noise_boxes(proposal.boxes, len(targets))
+        if len(filtered_boxes) < len(targets):
+            filtered_boxes = [[int(value) for value in box] for box in proposal.boxes]
+            rejected_boxes = []
+
+        box_keys = [tuple(int(value) for value in box) for box in filtered_boxes]
+        if all(key in box_candidate_cache for key in box_keys):
+            continue
+
+        novel_boxes = [
+            [int(value) for value in box]
+            for box, key in zip(filtered_boxes, box_keys)
+            if key not in box_candidate_cache
+        ]
+        novel_candidates, novel_failed_boxes = recognize_box_candidates_with_recovery(
             image,
-            proposal.boxes,
+            novel_boxes,
             targets,
             recognizer=cached_recognizer,
+            batch_recognizer=cached_batch_recognizer,
+            recognize_cache=recognize_cache,
+            stop_on_full_target_coverage=True,
         )
+        recognized_by_key = {
+            tuple(int(value) for value in candidate.bbox): candidate
+            for candidate in novel_candidates
+        }
+        failed_keys = {tuple(int(value) for value in box) for box in novel_failed_boxes}
+        for box in novel_boxes:
+            key = tuple(int(value) for value in box)
+            box_candidate_cache[key] = recognized_by_key.get(key)
+            if key not in recognized_by_key and key not in failed_keys:
+                box_candidate_cache[key] = None
+
+        candidates = [
+            box_candidate_cache[key]
+            for key in box_keys
+            if box_candidate_cache.get(key) is not None
+        ]
+        failed_boxes = [
+            [int(value) for value in key]
+            for key in box_keys
+            if box_candidate_cache.get(key) is None
+        ]
+        failed_boxes.extend(rejected_boxes)
         score = score_proposal_set(image, proposal, targets, candidates)
         scored.append(score)
         early_accepted, _ = accept_solution(score, None, expected_match_count=len(targets))
