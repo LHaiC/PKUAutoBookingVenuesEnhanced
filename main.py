@@ -123,7 +123,7 @@ def load_config(config):
 
     glm_enabled = conf.getboolean('glm_ocr', 'enabled') if conf.has_section('glm_ocr') else False
     glm_endpoint = conf['glm_ocr']['endpoint'] if conf.has_section('glm_ocr') else 'http://localhost:8000'
-    glm_timeout = conf.getint('glm_ocr', 'timeout') if conf.has_option('glm_ocr', 'timeout') else 10
+    glm_timeout = conf.getint('glm_ocr', 'timeout') if conf.has_option('glm_ocr', 'timeout') else 20
     allow_chaojiying_fallback = (
         conf.getboolean('glm_ocr', 'allow_chaojiying_fallback')
         if conf.has_option('glm_ocr', 'allow_chaojiying_fallback')
@@ -216,6 +216,8 @@ def page(
     if status:
         try:
             wait_until_datetime(wait_until)
+            log_str += f"到达预约开放时间：{datetime.datetime.now()}\n"
+            log_str += f"开始进入预约 {venue} 界面：{datetime.datetime.now()}\n"
             # 到点后直接进入场馆页；go_to_venue() 自带显式等待
             status, log_venue = go_to_venue(driver, venue)
             log_str += log_venue
@@ -224,9 +226,12 @@ def page(
             status = False
     if status:
         try:
+            log_str += f"开始查找空闲场地：{datetime.datetime.now()}\n"
             # 进入预约页后直接查找空闲场地；book() 内部会等待页面加载完成
+            scan_order_seed = f"{user_name}|{venue}|{start_time}|{end_time}|{config}"
             status, log_book, start_time, end_time, venue_num = book(driver, start_time_list_new,
-                                                                 end_time_list_new, delta_day_list, venue, venue_num)
+                                                                 end_time_list_new, delta_day_list, venue, venue_num,
+                                                                 scan_order_seed=scan_order_seed)
             log_str += log_book
         except:
             log_str += "点击预约表格失败\n"

@@ -11,6 +11,7 @@ from page_func import (
     click_submit_order,
     time_column_from_rows,
     venue_card_xpath,
+    venue_scan_order,
 )
 
 
@@ -28,6 +29,9 @@ class FakePaymentElement:
     def get_attribute(self, name):
         return ""
 
+    def is_enabled(self):
+        return True
+
     def click(self):
         self.clicked = True
 
@@ -38,14 +42,18 @@ class FakeSwitchTo:
 
 
 class FakePaymentDriver:
-    window_handles = ["main"]
-
     def __init__(self, elements):
         self.elements = elements
+        self.window_handles = ["main"]
         self.switch_to = FakeSwitchTo()
         self.page_source = "<html>payment</html>"
         self.scripts = []
         self.screenshot_path = None
+
+    def find_element(self, by, value):
+        if value == "select-word":
+            raise Exception("no captcha")
+        return self.elements[0]
 
     def find_elements(self, _by, _value):
         return self.elements
@@ -97,14 +105,43 @@ class PageFuncTests(unittest.TestCase):
 
         self.assertIsNone(time_column_from_rows(rows, start_time))
 
-    def test_click_pay_waits_for_manual_payment_by_default(self):
-        campus_card = FakePaymentElement("校园卡付款")
+    def test_venue_scan_order_returns_full_permutation(self):
+        order = venue_scan_order(6, "user|venue|1300")
+
+        self.assertEqual(sorted(order), [1, 2, 3, 4, 5, 6])
+        self.assertEqual(len(order), 6)
+
+    def test_venue_scan_order_avoids_low_number_first_when_choices_exist(self):
+        order = venue_scan_order(6, "user|venue|1300")
+
+        self.assertGreaterEqual(order[0], 4)
+        self.assertNotEqual(order, [1, 2, 3, 4, 5, 6])
+
+    def test_click_pay_clicks_primary_pay_button_when_present(self):
+        campus_card = FakePaymentElement("支付")
         driver = FakePaymentDriver([campus_card])
 
-        log = click_pay(driver, manual_wait_seconds=0)
+        class FakeWait:
+            def __init__(self, _driver, _timeout):
+                pass
 
-        self.assertFalse(campus_card.clicked)
-        self.assertIn("订单已提交，需要用户自行付款", log)
+            def until(self, _condition):
+                return True
+
+            def until_not(self, _condition):
+                return True
+
+        import page_func
+
+        original_wait = page_func.WebDriverWait
+        try:
+            page_func.WebDriverWait = FakeWait
+            log = click_pay(driver)
+        finally:
+            page_func.WebDriverWait = original_wait
+
+        self.assertTrue(campus_card.clicked)
+        self.assertIn("已点击支付按钮", log)
 
     def test_click_submit_order_clicks_visible_submit_button(self):
         submit = FakePaymentElement("提交")

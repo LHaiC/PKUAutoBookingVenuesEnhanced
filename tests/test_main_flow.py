@@ -8,6 +8,58 @@ import main
 
 
 class MainFlowTests(unittest.TestCase):
+    def test_page_logs_precise_booking_action_timestamps(self):
+        captured = {}
+
+        def fake_load_config(_config):
+            return (
+                "user",
+                "password",
+                "venue",
+                -1,
+                "7-0650",
+                "7-0750",
+                False,
+                "",
+                "",
+                "",
+                "",
+                True,
+                "http://localhost:8000",
+                20,
+                False,
+            )
+
+        class FakeDriver:
+            def quit(self):
+                return None
+
+        patches = {
+            "load_config": fake_load_config,
+            "judge_exceeds_days_limit": lambda _start, _end: (["7-0650"], ["7-0750"], [1], ""),
+            "build_driver": lambda _browser, headless=True: FakeDriver(),
+            "login": lambda *_args, **_kwargs: "login\n",
+            "wait_until_datetime": lambda *_args, **_kwargs: None,
+            "go_to_venue": lambda *_args, **_kwargs: (True, "venue\n"),
+            "book": lambda *_args, **_kwargs: (False, "book\n", "start", "end", 1),
+            "log_status": lambda _config, _times, log_str: captured.setdefault("log_str", log_str),
+        }
+        originals = {name: getattr(main, name) for name in patches}
+        original_sleep = main.time.sleep
+        try:
+            for name, value in patches.items():
+                setattr(main, name, value)
+            main.time.sleep = lambda _seconds: None
+
+            self.assertFalse(main.page("config.ini", "firefox", wait_until="2026-04-19 12:00:00"))
+            self.assertIn("到达预约开放时间：", captured["log_str"])
+            self.assertIn("开始进入预约 venue 界面：", captured["log_str"])
+            self.assertIn("开始查找空闲场地：", captured["log_str"])
+        finally:
+            for name, value in originals.items():
+                setattr(main, name, value)
+            main.time.sleep = original_sleep
+
     def test_page_submits_order_before_payment(self):
         calls = []
 
@@ -26,7 +78,7 @@ class MainFlowTests(unittest.TestCase):
                 "",
                 True,
                 "http://localhost:8000",
-                10,
+                20,
                 False,
             )
 
@@ -50,12 +102,10 @@ class MainFlowTests(unittest.TestCase):
         }
         originals = {name: getattr(main, name) for name in patches}
         original_sleep = main.time.sleep
-        original_imported_sleep = main.sleep
         try:
             for name, value in patches.items():
                 setattr(main, name, value)
             main.time.sleep = lambda _seconds: None
-            main.sleep = lambda _seconds: None
 
             self.assertTrue(main.page("config.ini", "firefox"))
 
@@ -65,7 +115,6 @@ class MainFlowTests(unittest.TestCase):
             for name, value in originals.items():
                 setattr(main, name, value)
             main.time.sleep = original_sleep
-            main.sleep = original_imported_sleep
 
     def test_page_waits_until_release_after_login_before_entering_venue(self):
         calls = []
@@ -85,7 +134,7 @@ class MainFlowTests(unittest.TestCase):
                 "",
                 True,
                 "http://localhost:8000",
-                10,
+                20,
                 False,
             )
 
@@ -104,12 +153,10 @@ class MainFlowTests(unittest.TestCase):
         }
         originals = {name: getattr(main, name) for name in patches}
         original_sleep = main.time.sleep
-        original_imported_sleep = main.sleep
         try:
             for name, value in patches.items():
                 setattr(main, name, value)
             main.time.sleep = lambda _seconds: None
-            main.sleep = lambda _seconds: None
 
             self.assertFalse(main.page("config.ini", "firefox", wait_until="2026-04-19 12:00:00"))
 
@@ -119,7 +166,6 @@ class MainFlowTests(unittest.TestCase):
             for name, value in originals.items():
                 setattr(main, name, value)
             main.time.sleep = original_sleep
-            main.sleep = original_imported_sleep
 
     def test_page_uses_task_overrides_when_config_has_no_booking_fields(self):
         calls = []
@@ -139,7 +185,7 @@ class MainFlowTests(unittest.TestCase):
                 "",
                 True,
                 "http://localhost:8000",
-                10,
+                20,
                 False,
             )
 
@@ -157,12 +203,10 @@ class MainFlowTests(unittest.TestCase):
         }
         originals = {name: getattr(main, name) for name in patches}
         original_sleep = main.time.sleep
-        original_imported_sleep = main.sleep
         try:
             for name, value in patches.items():
                 setattr(main, name, value)
             main.time.sleep = lambda _seconds: None
-            main.sleep = lambda _seconds: None
 
             self.assertFalse(
                 main.page(
@@ -180,7 +224,6 @@ class MainFlowTests(unittest.TestCase):
             for name, value in originals.items():
                 setattr(main, name, value)
             main.time.sleep = original_sleep
-            main.sleep = original_imported_sleep
 
 
 if __name__ == "__main__":

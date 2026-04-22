@@ -29,7 +29,7 @@ from captcha_vision import detect_colored_text_bboxes
 
 # GLM-OCR endpoint configuration
 GLM_ENDPOINT = os.environ.get("GLM_ENDPOINT", "http://localhost:8000/glmocr/parse")
-GLM_TIMEOUT = 10
+GLM_TIMEOUT = 20
 TEST_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "test.png")
 OUTPUT_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "test_output.png")
 SAMPLE_DIR = os.path.join(os.path.dirname(__file__), "captcha_samples")

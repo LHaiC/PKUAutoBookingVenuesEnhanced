@@ -9,6 +9,8 @@ except ModuleNotFoundError:
 from urllib.parse import quote
 import time
 import datetime
+import hashlib
+import math
 import warnings
 from chaojiying import *
 import base64
@@ -73,6 +75,27 @@ def time_column_from_rows(rows, start_time):
             if match and match.group(1) == expected_start:
                 return idx
     return None
+
+
+def venue_scan_order(venue_count, seed_text=""):
+    if venue_count <= 0:
+        return []
+    if venue_count == 1:
+        return [1]
+
+    encoded_seed = str(seed_text or "default").encode("utf-8")
+    digest = hashlib.sha256(encoded_seed).digest()
+    start_floor = venue_count // 2
+    start_span = max(1, venue_count - start_floor)
+    start_index = start_floor + (int.from_bytes(digest[:4], "big") % start_span)
+
+    coprime_steps = [step for step in range(2, venue_count) if math.gcd(step, venue_count) == 1]
+    if coprime_steps:
+        step = coprime_steps[int.from_bytes(digest[4:8], "big") % len(coprime_steps)]
+    else:
+        step = 1
+
+    return [((start_index + offset * step) % venue_count) + 1 for offset in range(venue_count)]
 
 
 def click_venue_card(driver, venue):
@@ -237,7 +260,7 @@ def judge_exceeds_days_limit(start_time, end_time):
     return start_time_list_new, end_time_list_new, delta_day_list, log_str
 
 
-def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_num=-1):
+def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_num=-1, scan_order_seed=None):
     print("查找空闲场地")
     log_str = "查找空闲场地\n"
 
@@ -304,6 +327,8 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
                 break
         raise ValueError(f"页面上找不到预约时间段: {str(start_time).split()[1][:5]}")
 
+    current_scan_seed = str(scan_order_seed or venue)
+
     def click_free(venue_num_click, time_num):
         WebDriverWait(driver, 5).until_not(
             EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
@@ -331,14 +356,14 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
                 return True, venue_num_click
 
         else:
-            # 随机点一列free的，防止每次都点第一列
-            for i in range(len(trs_list) - 1):
-                class_name = trs_list[i][time_num].find_element(By.TAG_NAME,
+            for venue_index in venue_scan_order(len(trs_list) - 1, current_scan_seed):
+                row_index = venue_index - 1
+                class_name = trs_list[row_index][time_num].find_element(By.TAG_NAME,
                                                                 'div').get_attribute("class")
                 print(class_name)
                 if class_name.split()[2] == 'free':
-                    venue_num_click = i + 1
-                    trs_list[i][time_num].find_element(By.TAG_NAME, 'div').click()
+                    venue_num_click = venue_index
+                    trs_list[row_index][time_num].find_element(By.TAG_NAME, 'div').click()
                     return True, venue_num_click
 
         return False, venue_num_click
@@ -378,6 +403,7 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
         print("结束时间:%s" % str(end_time).split()[1])
         time_num_current = time_num(start_time)
         print("时间列:%d" % time_num_current)
+        current_scan_seed = f"{scan_order_seed or venue}|{delta_day}|{start_time.strftime('%H%M')}|{end_time.strftime('%H%M')}"
         status, venue_num = click_free(venue_num, time_num_current)
 
         if status:
