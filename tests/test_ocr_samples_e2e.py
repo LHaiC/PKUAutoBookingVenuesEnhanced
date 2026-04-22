@@ -127,7 +127,7 @@ class TestOCRSamplesE2E(unittest.TestCase):
         if not check_server_ready():
             raise RuntimeError(
                 f"OCR server not ready at {OCR_ENDPOINT}. "
-                "Start it with: tmux a -t ocr (or python ocr_server_transformers.py)"
+                "Start it with: tmux a -t ocr"
             )
 
     def _annotate_if_needed(self, name: str, img: Image.Image, result: dict | None, targets: list):

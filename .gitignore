@@ -14,3 +14,5 @@ tasks.json
 status.json
 scheduler_status.json
 .scheduler.pid
+output/
+ocr_debug_*.png

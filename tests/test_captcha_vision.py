@@ -10,6 +10,8 @@ from PIL import Image, ImageDraw
 
 from captcha_vision import (
     DARK_PROPOSAL_SOURCE,
+    ISOLATED_DARK_PROPOSAL_VARIANT,
+    ISOLATED_PROPOSAL_VARIANT,
     PADDED_PROPOSAL_VARIANT,
     PRIMARY_PROPOSAL_SOURCE,
     PRIMARY_PROPOSAL_VARIANT,
@@ -111,6 +113,8 @@ class CaptchaVisionTests(unittest.TestCase):
                 (PRIMARY_PROPOSAL_SOURCE, PRIMARY_PROPOSAL_VARIANT),
                 (DARK_PROPOSAL_SOURCE, PRIMARY_PROPOSAL_VARIANT),
                 (PRIMARY_PROPOSAL_SOURCE, PADDED_PROPOSAL_VARIANT),
+                (PRIMARY_PROPOSAL_SOURCE, ISOLATED_PROPOSAL_VARIANT),
+                (DARK_PROPOSAL_SOURCE, ISOLATED_DARK_PROPOSAL_VARIANT),
             ],
         )
         self.assertTrue(all(len(item.boxes) >= 3 for item in proposals))
@@ -124,6 +128,14 @@ class CaptchaVisionTests(unittest.TestCase):
         )
         self.assertEqual(
             proposal_map[(PRIMARY_PROPOSAL_SOURCE, PADDED_PROPOSAL_VARIANT)],
+            [[10, 10, 26, 36], [50, 12, 68, 39], [95, 9, 115, 37]],
+        )
+        self.assertEqual(
+            proposal_map[(PRIMARY_PROPOSAL_SOURCE, ISOLATED_PROPOSAL_VARIANT)],
+            [[10, 10, 26, 36], [50, 12, 68, 39], [95, 9, 115, 37]],
+        )
+        self.assertEqual(
+            proposal_map[(DARK_PROPOSAL_SOURCE, ISOLATED_DARK_PROPOSAL_VARIANT)],
             [[10, 10, 26, 36], [50, 12, 68, 39], [95, 9, 115, 37]],
         )
 

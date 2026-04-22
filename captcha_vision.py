@@ -9,6 +9,8 @@ PRIMARY_PROPOSAL_SOURCE = "uniform_color_regions"
 DARK_PROPOSAL_SOURCE = "dark_regions"
 PRIMARY_PROPOSAL_VARIANT = "whitened"
 PADDED_PROPOSAL_VARIANT = "whitened_padded"
+ISOLATED_PROPOSAL_VARIANT = "isolated"
+ISOLATED_DARK_PROPOSAL_VARIANT = "isolated_dark"
 
 
 @dataclass
@@ -533,10 +535,26 @@ def generate_box_proposals(image: Image.Image) -> list[ProposalSet]:
         whitened.size,
         border=padded_border,
     )
+    isolated = isolate_colored_text(whitened)
+    isolated_uniform = detect_colored_text_bboxes(isolated)
+    isolated_dark = filter_captcha_text_bboxes(
+        detect_dark_regions(isolated, threshold=180),
+        whitened.size,
+    )
     return [
         ProposalSet(boxes=uniform, source=PRIMARY_PROPOSAL_SOURCE, preprocess_variant=PRIMARY_PROPOSAL_VARIANT),
         ProposalSet(boxes=dark, source=DARK_PROPOSAL_SOURCE, preprocess_variant=PRIMARY_PROPOSAL_VARIANT),
         ProposalSet(boxes=padded, source=PRIMARY_PROPOSAL_SOURCE, preprocess_variant=PADDED_PROPOSAL_VARIANT),
+        ProposalSet(
+            boxes=isolated_uniform,
+            source=PRIMARY_PROPOSAL_SOURCE,
+            preprocess_variant=ISOLATED_PROPOSAL_VARIANT,
+        ),
+        ProposalSet(
+            boxes=isolated_dark,
+            source=DARK_PROPOSAL_SOURCE,
+            preprocess_variant=ISOLATED_DARK_PROPOSAL_VARIANT,
+        ),
     ]
 
 

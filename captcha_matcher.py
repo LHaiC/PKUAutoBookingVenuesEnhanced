@@ -14,6 +14,7 @@ class Candidate:
     text: str
     bbox: list[int]
     confidence: float = 1.0
+    original_bbox: list[int] | None = None
 
 
 def bbox_center(bbox: list[int]) -> tuple[int, int]:
@@ -77,7 +78,15 @@ def normalize_candidate(item: dict) -> Candidate | None:
         confidence = _strict_float(item.get('confidence', 1.0))
     except (TypeError, ValueError):
         return None
-    return Candidate(text=text, bbox=bbox, confidence=confidence)
+    original_bbox = item.get('original_bbox')
+    if isinstance(original_bbox, (list, tuple)) and len(original_bbox) == 4:
+        try:
+            original_bbox = [_strict_int(v) for v in original_bbox]
+        except (TypeError, ValueError):
+            original_bbox = None
+    else:
+        original_bbox = None
+    return Candidate(text=text, bbox=bbox, confidence=confidence, original_bbox=original_bbox)
 
 
 def normalize_candidates(items: Iterable[dict]) -> list[Candidate]:
@@ -98,13 +107,16 @@ def candidate_sort_key(candidate: Candidate):
 
 def candidate_to_result(candidate: Candidate) -> dict:
     x, y = bbox_center(candidate.bbox)
-    return {
+    result = {
         'text': candidate.text,
         'bbox': list(candidate.bbox),
         'x': x,
         'y': y,
         'confidence': candidate.confidence,
     }
+    if candidate.original_bbox is not None:
+        result['original_bbox'] = list(candidate.original_bbox)
+    return result
 
 
 def match_targets(
@@ -131,6 +143,7 @@ def match_targets(
                 out_of_bounds.append((idx, candidate))
                 continue
             if not math.isfinite(candidate.confidence):
+                low_conf.append((idx, candidate))
                 continue
             if candidate.confidence < min_confidence:
                 low_conf.append((idx, candidate))
@@ -143,6 +156,8 @@ def match_targets(
             if out_of_bounds:
                 raise MatchError(f'bbox out of bounds: {target}')
             raise MatchError(f'missing target: {target}')
+        if len(high_conf) > 1:
+            raise MatchError(f'ambiguous target: {target}')
 
         idx, candidate = sorted((pair for pair in high_conf), key=lambda pair: candidate_sort_key(pair[1]))[0]
         used_indexes.add(idx)

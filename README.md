@@ -289,13 +289,7 @@ bash scripts/build_webui.sh
 python -m unittest discover -s tests
 ```
 
-如果 OCR 服务已启动，先跑离线回归入口：
-
-```bash
-bash test_ocr_samples.sh
-```
-
-可选再跑扩展端到端 OCR 回归：
+如果 OCR 服务已在 `tmux ocr` 中启动，离线回归入口统一使用 `pytest`：
 
 ```bash
 python -m pytest tests/test_ocr_samples_e2e.py -v

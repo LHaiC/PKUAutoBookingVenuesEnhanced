@@ -10,5 +10,3 @@ selenium
 torch
 transformers
 uvicorn
-paddlepaddle>=3.0.0
-paddleocr>=2.7.0
