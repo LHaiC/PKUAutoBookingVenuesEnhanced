@@ -9,7 +9,10 @@ from page_func import (
     booking_venue_kind,
     click_pay,
     click_submit_order,
+    free_venue_indices_from_statuses,
+    header_row_signature,
     time_column_from_rows,
+    time_column_index,
     venue_card_xpath,
     venue_scan_order,
 )
@@ -119,6 +122,29 @@ class PageFuncTests(unittest.TestCase):
         ]
 
         self.assertIsNone(time_column_from_rows(rows, start_time))
+
+    def test_time_column_index_maps_header_slots_once(self):
+        header = ["场地", "06:50-07:50", "07:50-08:50", "08:50-09:50"]
+
+        self.assertEqual(
+            time_column_index(header),
+            {"06:50": 1, "07:50": 2, "08:50": 3},
+        )
+
+    def test_header_row_signature_is_stable_for_same_header(self):
+        header = ["场地", "06:50-07:50", "07:50-08:50"]
+
+        self.assertEqual(header_row_signature(header), header_row_signature(list(header)))
+
+    def test_free_venue_indices_from_statuses_extracts_free_rows(self):
+        statuses = [
+            "reserveBlock position free",
+            "reserveBlock position used",
+            "reserveBlock position free",
+            "",
+        ]
+
+        self.assertEqual(free_venue_indices_from_statuses(statuses), [1, 3])
 
     def test_venue_scan_order_returns_full_permutation(self):
         order = venue_scan_order(6, "user|venue|1300")

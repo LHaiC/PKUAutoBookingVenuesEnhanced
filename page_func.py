@@ -77,6 +77,29 @@ def time_column_from_rows(rows, start_time):
     return None
 
 
+def time_column_index(header_row):
+    index = {}
+    for idx, text in enumerate(header_row):
+        match = re.search(r"(\d{2}:\d{2})\s*-\s*\d{2}:\d{2}", text)
+        if match:
+            index[match.group(1)] = idx
+    return index
+
+
+def header_row_signature(header_row):
+    normalized = "\x1f".join((text or "").strip() for text in header_row)
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+
+
+def free_venue_indices_from_statuses(statuses):
+    free_indices = []
+    for idx, status in enumerate(statuses, start=1):
+        parts = str(status or "").split()
+        if len(parts) >= 3 and parts[2] == "free":
+            free_indices.append(idx)
+    return free_indices
+
+
 def venue_scan_order(venue_count, seed_text=""):
     if venue_count <= 0:
         return []
@@ -263,6 +286,8 @@ def judge_exceeds_days_limit(start_time, end_time):
 def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_num=-1, scan_order_seed=None):
     print("查找空闲场地")
     log_str = "查找空闲场地\n"
+    header_index_cache = {}
+    table_snapshot = None
 
     def judge_close_to_time_12():
         now = datetime.datetime.today()
@@ -306,21 +331,52 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
         driver.find_element(By.XPATH,
                             '//*[@id="scrollTable"]/table/tbody/tr[last()]/td[last()]/div/i').click()
 
-    def visible_table_rows():
+    def invalidate_table_snapshot():
+        nonlocal table_snapshot
+        table_snapshot = None
+
+    def current_table_snapshot():
+        nonlocal table_snapshot
+        if table_snapshot is not None:
+            return table_snapshot
+
         table = driver.find_element(By.ID, 'scrollTable')
-        rows = []
+        text_rows = []
         for row in table.find_elements(By.TAG_NAME, 'tr'):
             cells = row.find_elements(By.TAG_NAME, 'td')
             if cells:
-                rows.append([cell.text.strip() for cell in cells])
-        return rows
+                text_rows.append([cell.text.strip() for cell in cells])
+
+        body_rows = []
+        tbodies = driver.find_elements(By.TAG_NAME, 'tbody')
+        if len(tbodies) > 1:
+            for row in tbodies[1].find_elements(By.TAG_NAME, 'tr')[:-1]:
+                body_rows.append(row.find_elements(By.TAG_NAME, 'td'))
+
+        header_row = text_rows[0] if text_rows else []
+        header_key = header_row_signature(header_row)
+        column_index = header_index_cache.get(header_key)
+        if column_index is None:
+            column_index = time_column_index(header_row)
+            header_index_cache[header_key] = column_index
+
+        table_snapshot = {
+            "rows": text_rows,
+            "header_index": column_index,
+            "body_rows": body_rows,
+            "free_indices_by_column": {},
+        }
+        return table_snapshot
 
     def time_num(start_time):
+        expected_start = str(start_time).split()[1][:5]
         for _ in range(8):
-            column = time_column_from_rows(visible_table_rows(), start_time)
+            snapshot = current_table_snapshot()
+            column = snapshot["header_index"].get(expected_start)
             if column is not None:
                 return column
             try:
+                invalidate_table_snapshot()
                 next_page()
                 # time.sleep(0.5)  # disabled for perf
             except Exception:
@@ -332,36 +388,36 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
     def click_free(venue_num_click, time_num):
         WebDriverWait(driver, 5).until_not(
             EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
-        trs = driver.find_elements(By.TAG_NAME, 'tr')
-        trs = (driver.find_elements(By.TAG_NAME, 'tbody'))
-        trs = trs[1].find_elements(By.TAG_NAME, 'tr')
-        trs_list = []
-        for i in range(0, len(trs) - 1):
-            trs_list.append(trs[i].find_elements(By.TAG_NAME, 'td'))
-        # print(len(trs_list))
+        snapshot = current_table_snapshot()
+        trs_list = snapshot["body_rows"]
         if len(trs_list) == 0:
             return False, -1
-        # print(len(trs_list[0]))
-        # print(len(trs_list[1]))
-        # print(len(trs_list[2]))
-        # print(venue_num_click, time_num)
+
+        free_indices = snapshot["free_indices_by_column"].get(time_num)
+        if free_indices is None:
+            statuses = []
+            for row_cells in trs_list:
+                try:
+                    statuses.append(
+                        row_cells[time_num].find_element(By.TAG_NAME, 'div').get_attribute("class")
+                    )
+                except Exception:
+                    statuses.append("")
+            free_indices = free_venue_indices_from_statuses(statuses)
+            snapshot["free_indices_by_column"][time_num] = free_indices
+
         if venue_num_click != -1:
             if venue_num_click < 1:
                 return False, venue_num_click
-            class_name = trs_list[venue_num_click - 1][time_num].find_element(By.TAG_NAME,
-                                                                              'div').get_attribute("class")
-            print(class_name)
-            if class_name.split()[2] == 'free':
+            if venue_num_click in free_indices:
                 trs_list[venue_num_click - 1][time_num].find_element(By.TAG_NAME, 'div').click()
                 return True, venue_num_click
 
         else:
-            for venue_index in venue_scan_order(len(trs_list) - 1, current_scan_seed):
-                row_index = venue_index - 1
-                class_name = trs_list[row_index][time_num].find_element(By.TAG_NAME,
-                                                                'div').get_attribute("class")
-                print(class_name)
-                if class_name.split()[2] == 'free':
+            free_set = set(free_indices)
+            for venue_index in venue_scan_order(len(trs_list), current_scan_seed):
+                if venue_index in free_set:
+                    row_index = venue_index - 1
                     venue_num_click = venue_index
                     trs_list[row_index][time_num].find_element(By.TAG_NAME, 'div').click()
                     return True, venue_num_click
@@ -381,6 +437,7 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
             else:
                 time.sleep(0.05)  # 接近放号时提高轮询精度，减少错过窗口的概率
         driver.refresh()
+        invalidate_table_snapshot()
         WebDriverWait(driver, 5).until_not(
             EC.visibility_of_element_located((By.CLASS_NAME, "loading.ivu-spin.ivu-spin-large.ivu-spin-fix")))
     status = False
@@ -391,8 +448,10 @@ def book(driver, start_time_list, end_time_list, delta_day_list, venue, venue_nu
 
         if k != 0:
             driver.refresh()
+            invalidate_table_snapshot()
 
         move_to_date(delta_day)
+        invalidate_table_snapshot()
 
         start_time = datetime.datetime.strptime(
             start_time.split('-')[1], "%H%M")

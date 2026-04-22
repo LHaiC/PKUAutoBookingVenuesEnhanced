@@ -46,6 +46,7 @@ SAMPLES = [
     ("captcha_sample_004_qian_si_li_20260420.png", ["前", "思", "力"]),
     ("captcha_sample_005_shu_ling_shi_20260420.png", ["叔", "领", "史"]),
     ("captcha_sample_006_chang_fang_ke_20260420.png", ["长", "方", "科"]),
+    ("captcha_sample_007_dui_qian_pang_20260422.png", ["队", "钱", "旁"]),
 ]
 
 # Color scheme for drawing boxes
@@ -233,6 +234,22 @@ class TestOCRSamplesE2E(unittest.TestCase):
     def test_sample_006_chang_fang_ke(self):
         """Test captcha with targets: 长, 方, 科"""
         name, targets = SAMPLES[5]
+        img, _ = load_sample(name)
+
+        result = get_ocr_result(img, targets)
+        results_text = [r["text"] for r in result.get("results", [])]
+
+        self._annotate_if_needed(name, img, result, targets)
+
+        self.assertEqual(
+            set(results_text), set(targets),
+            f"Sample {name}: expected {targets}, got {results_text}. "
+            f"Error: {result.get('error')}, detail: {result.get('detail')}"
+        )
+
+    def test_sample_007_dui_qian_pang(self):
+        """Test captcha with targets: 队, 钱, 旁"""
+        name, targets = SAMPLES[6]
         img, _ = load_sample(name)
 
         result = get_ocr_result(img, targets)

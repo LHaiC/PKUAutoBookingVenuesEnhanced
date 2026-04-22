@@ -112,7 +112,7 @@ class GlmOcrEngine:
                 return_tensors="pt",
             ).to(self.model.device)
             inputs.pop("token_type_ids", None)
-            generated_ids = self.model.generate(**inputs, max_new_tokens=1024)
+            generated_ids = self.model.generate(**inputs, max_new_tokens=128)
             output_ids = generated_ids[0][inputs["input_ids"].shape[1] :]
             return self.processor.decode(output_ids, skip_special_tokens=False)
 
