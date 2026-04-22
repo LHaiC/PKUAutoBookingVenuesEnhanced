@@ -37,29 +37,44 @@ class FakePaymentElement:
 
 
 class FakeSwitchTo:
+    def __init__(self, driver):
+        self.driver = driver
+
     def window(self, _handle):
-        pass
+        self.driver.current_handle = _handle
 
 
 class FakePaymentDriver:
     def __init__(self, elements):
-        self.elements = elements
         self.window_handles = ["main"]
-        self.switch_to = FakeSwitchTo()
-        self.page_source = "<html>payment</html>"
+        self.current_handle = "main"
+        if isinstance(elements, dict):
+            self.elements_by_handle = elements
+            self.window_handles = list(elements)
+            self.current_handle = self.window_handles[0]
+        else:
+            self.elements_by_handle = {"main": elements}
+        self.switch_to = FakeSwitchTo(self)
         self.scripts = []
         self.screenshot_path = None
+
+    @property
+    def page_source(self):
+        texts = "".join(element.text for element in self.elements_by_handle.get(self.current_handle, []))
+        return f"<html><body>{texts}</body></html>"
 
     def find_element(self, by, value):
         if value == "select-word":
             raise Exception("no captcha")
-        return self.elements[0]
+        return self.elements_by_handle[self.current_handle][0]
 
     def find_elements(self, _by, _value):
-        return self.elements
+        return self.elements_by_handle.get(self.current_handle, [])
 
     def execute_script(self, script, element=None):
         self.scripts.append(script)
+        if "document.body.innerText" in script:
+            return "\n".join(element.text for element in self.elements_by_handle.get(self.current_handle, []))
         if "click" in script and element is not None:
             element.clicked = True
 
@@ -142,6 +157,75 @@ class PageFuncTests(unittest.TestCase):
 
         self.assertTrue(campus_card.clicked)
         self.assertIn("已点击支付按钮", log)
+
+    def test_click_pay_prefers_campus_card_and_real_pay_button_over_summary_text(self):
+        summary = FakePaymentElement("请您支付：", width=400, height=120)
+        campus_card = FakePaymentElement("电子校园卡", width=160, height=40)
+        pay_button = FakePaymentElement("支付 （590s）", width=120, height=36)
+        driver = FakePaymentDriver([summary, campus_card, pay_button])
+        driver.window_handles = ["main", "order", "payment"]
+
+        class FakeWait:
+            def __init__(self, _driver, _timeout):
+                pass
+
+            def until(self, _condition):
+                return True
+
+            def until_not(self, _condition):
+                return True
+
+        import page_func
+
+        original_wait = page_func.WebDriverWait
+        try:
+            page_func.WebDriverWait = FakeWait
+            log = click_pay(driver)
+        finally:
+            page_func.WebDriverWait = original_wait
+
+        self.assertFalse(summary.clicked)
+        self.assertTrue(campus_card.clicked)
+        self.assertTrue(pay_button.clicked)
+        self.assertIn("已选择电子校园卡", log)
+        self.assertIn("已点击支付按钮", log)
+
+    def test_click_pay_falls_back_to_non_blank_payment_window(self):
+        payment_summary = FakePaymentElement("请您支付：", width=400, height=120)
+        campus_card = FakePaymentElement("电子校园卡", width=160, height=40)
+        pay_button = FakePaymentElement("支付 （590s）", width=120, height=36)
+        driver = FakePaymentDriver(
+            {
+                "main": [FakePaymentElement("首页")],
+                "payment": [payment_summary, campus_card, pay_button],
+                "blank": [],
+            }
+        )
+        driver.current_handle = "main"
+
+        class FakeWait:
+            def __init__(self, _driver, _timeout):
+                pass
+
+            def until(self, _condition):
+                return True
+
+            def until_not(self, _condition):
+                return True
+
+        import page_func
+
+        original_wait = page_func.WebDriverWait
+        try:
+            page_func.WebDriverWait = FakeWait
+            log = click_pay(driver)
+        finally:
+            page_func.WebDriverWait = original_wait
+
+        self.assertEqual(driver.current_handle, "payment")
+        self.assertTrue(campus_card.clicked)
+        self.assertTrue(pay_button.clicked)
+        self.assertIn("已选择电子校园卡", log)
 
     def test_click_submit_order_clicks_visible_submit_button(self):
         submit = FakePaymentElement("提交")

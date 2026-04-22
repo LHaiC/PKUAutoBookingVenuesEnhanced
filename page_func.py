@@ -473,6 +473,23 @@ def _element_area(element):
     return width * height
 
 
+def _normalized_element_text(element):
+    return re.sub(r"\s+", "", _element_payment_text(element))
+
+
+def _page_visible_text(driver):
+    try:
+        text = driver.execute_script("return document.body ? document.body.innerText : ''")
+        if isinstance(text, str):
+            return text
+    except Exception:
+        pass
+    try:
+        return getattr(driver, "page_source", "") or ""
+    except Exception:
+        return ""
+
+
 def submit_order_candidates(driver):
     locators = [
         "//*[self::button or self::div or self::a][normalize-space(.)='提交' and not(contains(@class, 'cancel'))]",
@@ -495,6 +512,96 @@ def submit_order_candidates(driver):
             candidates.append(element)
     candidates.sort(key=lambda element: _element_area(element) or 10**9)
     return candidates
+
+
+def payment_method_candidates(driver):
+    locators = [
+        "//*[self::button or self::div or self::a or self::label or self::span][contains(normalize-space(.), '电子校园卡')]",
+    ]
+    candidates = []
+    seen = set()
+    for xpath in locators:
+        try:
+            elements = driver.find_elements(By.XPATH, xpath)
+        except Exception:
+            elements = []
+        for element in elements:
+            if id(element) in seen or not _element_is_displayed(element):
+                continue
+            text = _normalized_element_text(element)
+            if "电子校园卡" not in text:
+                continue
+            seen.add(id(element))
+            candidates.append(element)
+    candidates.sort(key=lambda element: _element_area(element) or 10**9)
+    return candidates
+
+
+def pay_action_candidates(driver):
+    locators = [
+        "//*[self::button or self::div or self::a or self::span][contains(normalize-space(.), '支付')]",
+    ]
+    candidates = []
+    seen = set()
+    valid_text = re.compile(r"^(去)?支付(?:[（(]\d+s[)）])?$")
+    for xpath in locators:
+        try:
+            elements = driver.find_elements(By.XPATH, xpath)
+        except Exception:
+            elements = []
+        for element in elements:
+            if id(element) in seen or not _element_is_displayed(element):
+                continue
+            text = _normalized_element_text(element)
+            if not valid_text.match(text):
+                continue
+            seen.add(id(element))
+            candidates.append(element)
+    candidates.sort(key=lambda element: _element_area(element) or 10**9)
+    return candidates
+
+
+def payment_window_handle(driver, timeout=8, poll_interval=0.1):
+    handles = list(getattr(driver, "window_handles", []) or [])
+    if not handles:
+        raise RuntimeError("未检测到支付窗口")
+
+    payment_markers = ("电子校园卡", "支付方式", "请您支付", "北大收费平台", "账号余额")
+    deadline = time.time() + timeout
+    best_handle = handles[-1]
+    best_score = -1
+
+    while True:
+        handles = list(getattr(driver, "window_handles", []) or [])
+        for handle in reversed(handles):
+            try:
+                driver.switch_to.window(handle)
+            except Exception:
+                continue
+            try:
+                WebDriverWait(driver, 0.5).until(
+                    lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
+                )
+            except Exception:
+                pass
+
+            text = re.sub(r"\s+", "", _page_visible_text(driver))
+            score = sum(1 for marker in payment_markers if marker in text)
+            if payment_method_candidates(driver):
+                score += 3
+            if pay_action_candidates(driver):
+                score += 3
+
+            if score > best_score:
+                best_score = score
+                best_handle = handle
+
+            if score >= 3:
+                return handle
+
+        if time.time() >= deadline:
+            return best_handle
+        time.sleep(poll_interval)
 
 
 def click_submit_order(driver, timeout=10, poll_interval=0.05):
@@ -616,8 +723,9 @@ def click_pay(driver):
         print(f"未检测到新窗口，当前窗口数: {len(driver.window_handles)}")
 
     handles = driver.window_handles
-    print(f"当前窗口数: {len(handles)}, 切换到: {handles[-1]}")
-    driver.switch_to.window(handles[-1])
+    payment_handle = payment_window_handle(driver)
+    print(f"当前窗口数: {len(handles)}, 切换到: {payment_handle}")
+    driver.switch_to.window(payment_handle)
 
     # 等待 spinner 消失
     try:
@@ -627,29 +735,56 @@ def click_pay(driver):
     except Exception:
         pass
 
-    # 尝试点击"支付"按钮（通用匹配：含"支付"文本的按钮）
     try:
-        pay_button_xpath = "//button[contains(text(),'支付')]"
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, pay_button_xpath)))
-        driver.find_element(By.XPATH, pay_button_xpath).click()
+        campus_card_options = payment_method_candidates(driver)
+        if campus_card_options:
+            campus_card = campus_card_options[0]
+            try:
+                driver.execute_script('arguments[0].scrollIntoView({block: "center"});', campus_card)
+            except Exception:
+                pass
+            try:
+                campus_card.click()
+            except Exception:
+                driver.execute_script('arguments[0].click();', campus_card)
+            print("已选择电子校园卡")
+            log_str += "已选择电子校园卡\n"
+            time.sleep(0.05)
+
+        pay_candidates = pay_action_candidates(driver)
+        if not pay_candidates:
+            raise RuntimeError("找不到支付按钮")
+        pay_button = pay_candidates[0]
+        try:
+            driver.execute_script('arguments[0].scrollIntoView({block: "center"});', pay_button)
+        except Exception:
+            pass
+        try:
+            pay_button.click()
+        except Exception:
+            driver.execute_script('arguments[0].click();', pay_button)
         print("已点击支付按钮")
         log_str += "已点击支付按钮\n"
     except Exception as exc:
         print(f"未找到支付按钮，尝试其他方式: {exc}")
         print_page_visible_text(driver, "支付页面内容")
-        # 备用：点击任何包含"支付"的可点击元素
         try:
-            alt_xpath = "//*[contains(text(),'支付')]"
-            elems = driver.find_elements(By.XPATH, alt_xpath)
-            for elem in elems:
-                if elem.is_displayed() and elem.is_enabled():
+            for elem in pay_action_candidates(driver):
+                try:
+                    elem.click()
+                    print(f"备用点击成功: {_element_payment_text(elem)}")
+                    log_str += f"备用点击: {_element_payment_text(elem)}\n"
+                    break
+                except Exception:
                     try:
-                        elem.click()
-                        print(f"备用点击成功: {elem.text}")
-                        log_str += f"备用点击: {elem.text}\n"
+                        driver.execute_script('arguments[0].click();', elem)
+                        print(f"备用点击成功: {_element_payment_text(elem)}")
+                        log_str += f"备用点击: {_element_payment_text(elem)}\n"
                         break
                     except Exception:
                         continue
+            else:
+                log_str += f"支付按钮点击失败: {exc}\n"
         except Exception as e2:
             print(f"备用点击也失败: {e2}")
             log_str += f"支付按钮点击失败: {exc}\n"
