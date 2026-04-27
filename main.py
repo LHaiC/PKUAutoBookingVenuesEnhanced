@@ -266,6 +266,7 @@ def page(
     if status:
         try:
             log_str += click_submit_order(driver)
+            log_str += "订单已产生\n"
         except Exception as exc:
             log_str += f"提交订单失败: {exc}\n"
             print(f"提交订单失败: {exc}\n")
@@ -273,10 +274,10 @@ def page(
     if status:
         try:
             log_str += click_pay(driver)
-        except:
-            log_str += "付款失败\n"
-            print("付款失败\n")
-            status = False
+        except Exception as exc:
+            # 订单在提交成功后已经产生；自动付款失败只影响支付状态。
+            log_str += f"付款未完成: {exc}\n"
+            print(f"付款未完成: {exc}\n")
     if status and wechat_notice:
         try:
             log_str += wechat_notification(user_name,

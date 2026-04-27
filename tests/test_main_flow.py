@@ -116,6 +116,69 @@ class MainFlowTests(unittest.TestCase):
                 setattr(main, name, value)
             main.time.sleep = original_sleep
 
+    def test_page_treats_submitted_order_as_success_when_payment_lookup_fails(self):
+        calls = []
+        captured = {}
+
+        def fake_load_config(_config):
+            return (
+                "user",
+                "password",
+                "venue",
+                -1,
+                "7-0650",
+                "7-0750",
+                True,
+                "token",
+                "",
+                "",
+                "",
+                True,
+                "http://localhost:8000",
+                20,
+                False,
+            )
+
+        class FakeDriver:
+            def quit(self):
+                calls.append("quit")
+
+        def fail_payment(_driver):
+            raise RuntimeError("找不到支付按钮")
+
+        patches = {
+            "load_config": fake_load_config,
+            "judge_exceeds_days_limit": lambda _start, _end: (["7-0650"], ["7-0750"], [1], ""),
+            "build_driver": lambda _browser, headless=True: FakeDriver(),
+            "login": lambda *_args, **_kwargs: "login\n",
+            "go_to_venue": lambda *_args, **_kwargs: (True, "venue\n"),
+            "book": lambda *_args, **_kwargs: (True, "book\n", "start", "end", 1),
+            "click_agree": lambda *_args, **_kwargs: "agree\n",
+            "click_book": lambda *_args, **_kwargs: "book_confirm\n",
+            "verify": lambda *_args, **_kwargs: "verify\n",
+            "click_submit_order": lambda *_args, **_kwargs: "submit\n",
+            "click_pay": fail_payment,
+            "wechat_notification": lambda *_args, **_kwargs: calls.append("notify") or "notify\n",
+            "log_status": lambda _config, _times, log_str: captured.setdefault("log_str", log_str),
+        }
+        originals = {name: getattr(main, name) for name in patches}
+        original_sleep = main.time.sleep
+        try:
+            for name, value in patches.items():
+                setattr(main, name, value)
+            main.time.sleep = lambda _seconds: None
+
+            self.assertTrue(main.page("config.ini", "firefox"))
+
+            self.assertIn("submit\n", captured["log_str"])
+            self.assertIn("订单已产生", captured["log_str"])
+            self.assertIn("付款未完成: 找不到支付按钮", captured["log_str"])
+            self.assertIn("notify", calls)
+        finally:
+            for name, value in originals.items():
+                setattr(main, name, value)
+            main.time.sleep = original_sleep
+
     def test_page_waits_until_release_after_login_before_entering_venue(self):
         calls = []
 

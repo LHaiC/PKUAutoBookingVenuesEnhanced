@@ -199,7 +199,10 @@ def _recognize_many_with_cache(
 
     if missing_bytes:
         if batch_recognizer is not None and len(missing_bytes) > 1:
-            recognized = batch_recognizer(missing_bytes, targets)
+            try:
+                recognized = batch_recognizer(missing_bytes, targets)
+            except Exception:
+                recognized = [recognizer(image_bytes) for image_bytes in missing_bytes]
         else:
             recognized = [recognizer(image_bytes) for image_bytes in missing_bytes]
         for idx, image_bytes, output in zip(missing_positions, missing_bytes, recognized):

@@ -748,6 +748,8 @@ def save_page_html(driver, path="page_debug.html", label="页面HTML"):
 def click_pay(driver):
     print("付款（电子校园卡）")
     log_str = "付款（电子校园卡）\n"
+    payment_clicked = False
+    payment_failure = None
 
     # 检查是否有待处理的安全验证
     try:
@@ -822,21 +824,25 @@ def click_pay(driver):
             pay_button.click()
         except Exception:
             driver.execute_script('arguments[0].click();', pay_button)
+        payment_clicked = True
         print("已点击支付按钮")
         log_str += "已点击支付按钮\n"
     except Exception as exc:
+        payment_failure = exc
         print(f"未找到支付按钮，尝试其他方式: {exc}")
         print_page_visible_text(driver, "支付页面内容")
         try:
             for elem in pay_action_candidates(driver):
                 try:
                     elem.click()
+                    payment_clicked = True
                     print(f"备用点击成功: {_element_payment_text(elem)}")
                     log_str += f"备用点击: {_element_payment_text(elem)}\n"
                     break
                 except Exception:
                     try:
                         driver.execute_script('arguments[0].click();', elem)
+                        payment_clicked = True
                         print(f"备用点击成功: {_element_payment_text(elem)}")
                         log_str += f"备用点击: {_element_payment_text(elem)}\n"
                         break
@@ -848,8 +854,13 @@ def click_pay(driver):
             print(f"备用点击也失败: {e2}")
             log_str += f"支付按钮点击失败: {exc}\n"
 
-    log_str += "付款完成\n"
-    print("付款完成")
+    if payment_clicked:
+        log_str += "付款操作已提交\n"
+        print("付款操作已提交")
+    else:
+        reason = f": {payment_failure}" if payment_failure is not None else ""
+        log_str += f"付款未完成{reason}\n"
+        print(f"付款未完成{reason}")
     return log_str
 
 

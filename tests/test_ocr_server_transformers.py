@@ -1587,6 +1587,30 @@ class OcrServerTransformerTests(unittest.TestCase):
         strip_mock.assert_not_called()
         rotated_mock.assert_not_called()
 
+    def test_batch_crop_recognition_falls_back_to_single_calls_when_batch_fails(self):
+        calls = []
+
+        def recognizer(image_bytes):
+            calls.append(image_bytes)
+            return {
+                b"crop-a": "识别结果：今",
+                b"crop-b": "识别结果：入",
+            }[image_bytes]
+
+        def broken_batch(_image_bytes_list, _targets):
+            raise RuntimeError("batch processor rejected multi-image input")
+
+        outputs = ocr_server_transformers._recognize_many_with_cache(
+            recognizer,
+            broken_batch,
+            {},
+            [b"crop-a", b"crop-b"],
+            ["今", "入"],
+        )
+
+        self.assertEqual(outputs, ["识别结果：今", "识别结果：入"])
+        self.assertEqual(calls, [b"crop-a", b"crop-b"])
+
     def test_parse_route_rejects_invalid_image_data(self):
         ocr_server_transformers.engine = FakeEngine()
 

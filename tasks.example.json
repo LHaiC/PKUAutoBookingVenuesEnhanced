@@ -1,18 +1,18 @@
 {
   "tasks": [
     {
-      "id": "wusi-0422-0650",
-      "name": "五四羽毛球馆 04/22 06:50",
+      "id": "example-sat-13-15",
+      "name": "Example Saturday 13:00-15:00",
       "config": "config.ini",
       "browser": "firefox",
       "enabled": true,
       "venue": "五四体育中心-羽毛球馆",
       "venue_num": "-1",
-      "start_time": "20260422-0650",
-      "end_time": "20260422-0750",
+      "start_time": "6-1300",
+      "end_time": "6-1500",
       "lead_seconds": 60,
-      "interval_seconds": 5,
-      "max_attempts": 120,
+      "interval_seconds": 1,
+      "max_attempts": 10,
       "timeout_seconds": 180
     }
   ]

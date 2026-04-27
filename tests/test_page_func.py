@@ -253,6 +253,34 @@ class PageFuncTests(unittest.TestCase):
         self.assertTrue(pay_button.clicked)
         self.assertIn("已选择电子校园卡", log)
 
+    def test_click_pay_reports_incomplete_when_pay_button_missing(self):
+        payment_summary = FakePaymentElement("请您支付：", width=400, height=120)
+        campus_card = FakePaymentElement("电子校园卡", width=160, height=40)
+        driver = FakePaymentDriver([payment_summary, campus_card])
+
+        class FakeWait:
+            def __init__(self, _driver, _timeout):
+                pass
+
+            def until(self, _condition):
+                return True
+
+            def until_not(self, _condition):
+                return True
+
+        import page_func
+
+        original_wait = page_func.WebDriverWait
+        try:
+            page_func.WebDriverWait = FakeWait
+            log = click_pay(driver)
+        finally:
+            page_func.WebDriverWait = original_wait
+
+        self.assertIn("支付按钮点击失败: 找不到支付按钮", log)
+        self.assertIn("付款未完成", log)
+        self.assertNotIn("付款完成", log)
+
     def test_click_submit_order_clicks_visible_submit_button(self):
         submit = FakePaymentElement("提交")
         driver = FakePaymentDriver([submit])
